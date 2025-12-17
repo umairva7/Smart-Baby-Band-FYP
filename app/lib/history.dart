@@ -1,26 +1,65 @@
 import 'package:flutter/material.dart';
 import 'navigation.dart';
+import 'cryhistory.dart';
+import 'sleephistory.dart';
+import 'tempraturehistory.dart';
+import 'heartratehistory.dart';
 
-class HistoryPage extends StatelessWidget {
+class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
+
+  @override
+  State<HistoryPage> createState() => _HistoryPageState();
+}
+
+class _HistoryPageState extends State<HistoryPage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5FBFF),
       appBar: AppBar(
-        title: const Text('History'),
-        backgroundColor: const Color(0xFF3BB9FF),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         centerTitle: true,
-      ),
-      body: const Center(
-        child: Text(
-          'No history data available yet!',
-          style: TextStyle(fontSize: 18, color: Colors.grey),
+        title: const Text(
+          "History",
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.black,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: const Color(0xFF3BB9FF),
+          tabs: const [
+            Tab(text: "Cry"),
+            Tab(text: "Sleep"),
+            Tab(text: "Temperature"),
+            Tab(text: "Heartbeat"),
+          ],
         ),
       ),
-
-      // navigation bar at the bottom
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          CryPage(),
+          SleepPage(),
+          TemperaturePage(),
+          HeartbeatPage(),
+        ],
+      ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 1),
     );
   }

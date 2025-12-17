@@ -28,6 +28,7 @@ class _DashboardPageState extends State<DashboardPage> {
     ]);
   }
 
+  // ignore: unused_element
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
