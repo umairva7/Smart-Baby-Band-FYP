@@ -37,34 +37,6 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ---
 
-## 👥 Team & Roles
-
-### 🔹 Arslan Shafique – Hardware & IoT Lead
-
-* Sensor integration (INMP441, MPU6050, MAX30102, BME280/DHT11)
-* ESP32 firmware development
-* BLE & WiFi communication setup
-* MQTT publish/subscribe implementation
-* AWS IoT / Firebase cloud integration
-* Secure device authentication & TLS configuration
-* Edge & cloud AI model deployment
-
-### 🔹 Muhammad Uzair – Mobile App Developer
-
-* Flutter-based mobile application
-* Real-time dashboard development
-* BLE integration
-* Notifications & reporting features
-
-### 🔹 Umair Imran – Backend Integration Lead
-
-* API development
-* Cloud data routing
-* AI inference endpoints
-* Secure backend services
-
----
-
 ## 🔧 Hardware Stack
 
 | Component      | Purpose                                  |
