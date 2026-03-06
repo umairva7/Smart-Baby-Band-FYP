@@ -13,12 +13,12 @@ The objective is to assist parents in understanding baby needs through intellige
 
 ### Core Capabilities
 
-* 🎤 AI-Based Cry Classification
-* 💤 Sleep Stage Detection
-* 💓 Heart Rate Monitoring
-* 🌡️ Temperature & Humidity Monitoring
-* 📡 Real-Time Cloud Communication
-* 📱 Mobile Dashboard with Alerts & Reports
+* 🎤 AI-Based Cry Classification (Hunger, Pain, Discomfort, Normal)
+* 💤 Sleep Stage Detection (Awake, Light, Deep)
+* 💓 Heart Rate Monitoring (MAX30102)
+* 🌡️ Temperature & Humidity Monitoring (BME280 / DHT11)
+* 📡 Real-Time Cloud Communication (MQTT / Firebase)
+* 📱 Mobile Dashboard with Alerts & Reports (Flutter)
 
 ---
 
@@ -64,29 +64,18 @@ This architecture ensures low latency, secure communication, and scalability.
 
 * Audio preprocessing using MFCC (Mel-Frequency Cepstral Coefficients)
 * Neural network model trained on labeled cry dataset
-* Classification categories:
-
-  * Hunger
-  * Pain
-  * Discomfort
-  * Normal
+* Classification categories: Hunger, Pain, Discomfort, Normal
 
 ### 💤 Sleep Stage Detection
 
 * Motion analysis using MPU6050
 * Heart rate variability analysis
-* Sleep state estimation:
-
-  * Awake
-  * Light Sleep
-  * Deep Sleep
+* Sleep state estimation: Awake, Light Sleep, Deep Sleep
 
 ### ML Technology Stack
 
-* Python
-* TensorFlow / PyTorch
-* Librosa (Audio Feature Extraction)
-* Scikit-learn
+* **Python** (TensorFlow / PyTorch / Librosa / Scikit-learn)
+* **TensorFlow Lite / ONNX** (Model deployment)
 
 ---
 
@@ -101,6 +90,7 @@ This architecture ensures low latency, secure communication, and scalability.
 
 * AWS IoT Core
 * Firebase Realtime Database
+* MongoDB Atlas (Cloud Database)
 
 ### Cloud Capabilities
 
@@ -127,50 +117,25 @@ The mobile application acts as the primary user interface for parents.
 
 ---
 
-## 🔐 Security Implementation
+## 👨‍👩 team Members & Roles
 
-* MQTT over TLS encryption
-* AWS IoT certificate-based device authentication
-* Secure REST APIs
-* Encrypted mobile login
-* Role-based access control
-
----
-
-## 📊 Key Features Summary
-
-✔ Real-time cry classification
-✔ AI-powered sleep prediction
-✔ Environmental comfort monitoring
-✔ Mobile push notifications
-✔ Cloud-based analytics dashboard
-✔ Cost-effective IoT architecture
+* **Umair Imran** → AI/ML Engineer
+* **Arslan Shafique** → Hardware Developer
+* **Uzair Ghaffar** → Mobile App Developer
 
 ---
 
 ## 📂 Repository Structure
 
-```
-/hardware
-   ├── esp32_firmware
-   ├── sensor_drivers
-
-/cloud
-   ├── mqtt_config
-   ├── aws_iot
-   ├── firebase_config
-
-/ai
-   ├── cry_classification_model
-   ├── sleep_detection_model
-
-/mobile_app
-   ├── flutter_app
-
-/docs
-   ├── architecture_diagrams
-   ├── proposal
-   ├── final_presentation
+```text
+Smart-Baby-Band-FYP/
+├── app/               # Flutter mobile app
+├── backend/           # Node.js backend (API + MongoDB)
+├── docs/              # Reports, diagrams, presentations
+├── hardware/          # Hardware code (ESP32 + sensors)
+├── ml_model/          # Cry detection model (datasets, training, inference)
+├── .gitignore         # Root git ignore patterns
+└── requirements.txt   # Python dependencies
 ```
 
 ---
@@ -180,7 +145,7 @@ The mobile application acts as the primary user interface for parents.
 * Embedded Systems Engineering (ESP32)
 * IoT Architecture Design
 * MQTT Protocol Implementation
-* Cloud Computing (AWS IoT / Firebase)
+* Cloud Computing (AWS IoT / Firebase / MongoDB)
 * AI Model Development & Deployment
 * Edge Processing
 * Real-Time Data Streaming
@@ -222,4 +187,3 @@ It reflects practical industry-ready skills in IoT, AI systems, and cloud integr
 Academic Research Project – University of Central Punjab (2025)
 
 For demonstration and educational purposes.
-#
