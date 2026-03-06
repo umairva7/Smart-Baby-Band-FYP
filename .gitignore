@@ -1,0 +1,9 @@
+.venv/
+venv/
+*.pyc
+__pycache__/
+ml_model/data/raw/
+ml_model/models/*.h5
+ml_model/models/*.tflite
+node_modules/
+.env

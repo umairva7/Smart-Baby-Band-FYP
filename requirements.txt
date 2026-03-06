@@ -1,0 +1,11 @@
+# Python packages for cry detection ML model
+librosa>=0.10.1
+numpy>=1.26.0
+scipy>=1.11.3
+scikit-learn>=1.3.1
+tensorflow>=2.16.1
+pandas>=2.1.1
+soundfile>=0.12.1
+matplotlib>=3.8.0
+jupyter>=1.1.1
+ipython>=8.18.0
