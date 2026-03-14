@@ -117,7 +117,7 @@ The mobile application acts as the primary user interface for parents.
 
 ---
 
-## 👨‍👩 team Members & Roles
+##  Team Members & Roles
 
 * **Umair Imran** → AI/ML Engineer
 * **Arslan Shafique** → Hardware Developer
