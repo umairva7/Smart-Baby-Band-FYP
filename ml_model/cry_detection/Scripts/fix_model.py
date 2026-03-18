@@ -29,7 +29,7 @@ print("=" * 70)
 
 print("\n[1/5] Loading original model...")
 try:
-    model = tf.keras.models.load_model("../models/cry_detection/cnn_model.h5")
+    model = tf.keras.models.load_model("../models/cry_detection/cnn_model_v1.h5")
     print("✓ Model loaded successfully")
 except Exception as e:
     print(f"✗ Error loading model: {e}")
@@ -190,9 +190,9 @@ try:
     
     print(f"\nInput shape required: {input_shape}")
     
-    # Create dummy MFCC input (128, 13)
-    # This should match what hardware will send
-    dummy_input = np.random.randn(1, 128, 13).astype(np.float32)
+    # Create dummy MFCC input to match your V1 model shape
+    # 1 batch, 128 frames, 39 features (MFCC+Delta+Delta^2), 1 channel
+    dummy_input = np.random.randn(1, 128, 39, 1).astype(np.float32)
     
     print(f"Created dummy input shape: {dummy_input.shape}")
     

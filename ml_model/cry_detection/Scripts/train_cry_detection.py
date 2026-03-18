@@ -1,10 +1,9 @@
 import os
 import numpy as np
 from pathlib import Path
-import librosa
 from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix, classification_report
 import tensorflow as tf
-from tensorflow.keras import layers, models
+from tensorflow.keras import layers, models, regularizers
 import pickle
 import json
 from datetime import datetime
@@ -13,27 +12,22 @@ from datetime import datetime
 # CONFIGURATION
 # ============================================================================
 
-DATA_DIR = Path("../data/raw/model 1/audio")
-MODELS_DIR = Path("../models")
+PROCESSED_DIR = Path("../data/processed")
+MODELS_DIR = Path("../models/cry_detection")
 LOGS_DIR = Path("../logs")
 
 # Create directories
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Audio parameters
-SAMPLING_RATE = 16000
-N_MFCC = 13
-FRAMES_PER_SAMPLE = 128  # 2 seconds at 16kHz with 10ms hop
-FRAME_LENGTH = int(0.025 * SAMPLING_RATE)  # 25 ms
-HOP_LENGTH = int(0.010 * SAMPLING_RATE)  # 10 ms
-
 # Training parameters
 BATCH_SIZE = 32
-EPOCHS = 60
-LEARNING_RATE = 0.001
+EPOCHS = 100
+LEARNING_RATE = 0.0005
+PATIENCE_EARLY_STOP = 15
+PATIENCE_LR_REDUCE = 7
 
-# Random seed for reproducibility
+# Random seed
 RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
 tf.random.set_seed(RANDOM_SEED)
@@ -50,164 +44,63 @@ def log_message(msg):
     return full_msg
 
 
-def extract_mfcc(audio_path, target_shape=(FRAMES_PER_SAMPLE, N_MFCC)):
-    """
-    Extract MFCC features from audio file.
-
-    Args:
-        audio_path: Path to audio file
-        target_shape: Target shape (frames, coefficients)
-
-    Returns:
-        mfcc: (frames, n_mfcc) array or None if error
-        valid: Boolean indicating success
-    """
-    try:
-        # Load audio
-        y, sr = librosa.load(audio_path, sr=SAMPLING_RATE, duration=3.0)
-
-        # Skip very short audio
-        if len(y) < SAMPLING_RATE * 0.5:  # Less than 0.5 sec
-            return None, False
-
-        # Extract MFCC
-        mfcc = librosa.feature.mfcc(
-            y=y,
-            sr=SAMPLING_RATE,
-            n_mfcc=N_MFCC,
-            n_fft=FRAME_LENGTH,
-            hop_length=HOP_LENGTH
-        )
-
-        # Transpose to (frames, coefficients)
-        mfcc = mfcc.T
-
-        # Pad or truncate to target shape
-        if mfcc.shape[0] < target_shape[0]:
-            pad_width = ((0, target_shape[0] - mfcc.shape[0]), (0, 0))
-            mfcc = np.pad(mfcc, pad_width, mode='constant', constant_values=0)
-        else:
-            mfcc = mfcc[:target_shape[0], :]
-
-        return mfcc.astype(np.float32), True
-
-    except Exception as e:
-        return None, False
-
-
 # ============================================================================
-# DATA LOADING
+# LOAD PREPROCESSED DATA
 # ============================================================================
 
 def load_split(split_name):
-    """
-    Load ICSD split (train, validation, or test).
-
-    Args:
-        split_name: "train", "validation", or "test"
-
-    Returns:
-        X: (n_samples, 128, 13) MFCC features
-        y: (n_samples,) labels (1=cry, 0=snoring)
-        sample_count: dict with counts per category
-    """
-
-    split_dir = DATA_DIR / split_name
-
-    if not split_dir.exists():
-        log_message(f"ERROR: Directory not found: {split_dir}")
-        return None, None, None
-
-    X = []
-    y = []
-    sample_count = {
-        'cry': 0,
-        'snoring': 0,
-        'total': 0
-    }
-
-    log_message(f"  Searching for audio files in {split_dir}...")
-    files = list(split_dir.rglob("*.wav"))
+    """Load preprocessed features from disk."""
+    split_dir = PROCESSED_DIR / split_name
     
-    if len(files) == 0:
-        log_message(f"ERROR: No .wav files found in {split_dir}")
-        return None, None, None
-
-    log_message(f"  Found {len(files)} files. Extracting features...")
-
-    successful = 0
-    for i, audio_file in enumerate(files):
-        # Infer label from filename
-        filename = audio_file.name
-        label = None
-        if "Infantcry" in filename:
-            label = 1
-            sample_count['cry'] += 1
-        elif "Snoring" in filename:
-            label = 0
-            sample_count['snoring'] += 1
-        
-        if label is not None:
-            mfcc, valid = extract_mfcc(audio_file)
-            if valid:
-                X.append(mfcc)
-                y.append(label)
-                successful += 1
-
-        if (i + 1) % 500 == 0 and len(files) > 500:
-            log_message(f"    Processed {i + 1}/{len(files)} files, {successful} successful")
-
-    if len(X) == 0:
-        log_message(f"ERROR: No valid audio files processed from {split_dir}")
-        return None, None, None
-
-    X = np.array(X)
-    y = np.array(y)
-    sample_count['total'] = len(X)
-
-    log_message(f"    ✓ Loaded {successful} samples ({sample_count['cry']} cry, {sample_count['snoring']} snoring)")
-
-    return X, y, sample_count
+    X_path = split_dir / f"X_{split_name}.npy"
+    y_path = split_dir / f"y_{split_name}.npy"
+    
+    if not X_path.exists() or not y_path.exists():
+        log_message(f"ERROR: Preprocessed files not found for {split_name}")
+        log_message(f"  Expected: {X_path}")
+        log_message(f"  Expected: {y_path}")
+        return None, None
+    
+    X = np.load(X_path)
+    y = np.load(y_path)
+    
+    log_message(f"  ✓ Loaded {split_name}: X={X.shape}, y={y.shape}")
+    log_message(f"    - Crying:  {np.sum(y == 1)}")
+    log_message(f"    - Snoring: {np.sum(y == 0)}")
+    
+    return X, y
 
 
 def load_all_splits():
-    """Load train, validation, and test sets"""
+    """Load all preprocessed splits."""
+    log_message("=" * 70)
+    log_message("LOADING PREPROCESSED DATA")
+    log_message("=" * 70)
 
-    log_message("=" * 70)
-    log_message("LOADING ICSD DATASET (Using Pre-Made Splits)")
-    log_message("=" * 70)
+    log_message(f"\nProcessed data directory: {PROCESSED_DIR}")
 
     # Train set
     log_message("\nTRAIN SET:")
-    X_train, y_train, train_counts = load_split("train")
+    X_train, y_train = load_split("train")
     if X_train is None:
         return None
 
-    log_message(f"  Shape: {X_train.shape}")
-    log_message(f"  Crying: {np.sum(y_train == 1):5d}, Snoring: {np.sum(y_train == 0):5d}")
-
     # Validation set
     log_message("\nVALIDATION SET:")
-    X_val, y_val, val_counts = load_split("validation")
+    X_val, y_val = load_split("validation")
     if X_val is None:
         return None
 
-    log_message(f"  Shape: {X_val.shape}")
-    log_message(f"  Crying: {np.sum(y_val == 1):5d}, Snoring: {np.sum(y_val == 0):5d}")
-
     # Test set
     log_message("\nTEST SET:")
-    X_test, y_test, test_counts = load_split("test")
+    X_test, y_test = load_split("test")
     if X_test is None:
         return None
 
-    log_message(f"  Shape: {X_test.shape}")
-    log_message(f"  Crying: {np.sum(y_test == 1):5d}, Snoring: {np.sum(y_test == 0):5d}")
-
     return {
-        'X_train': X_train, 'y_train': y_train, 'train_counts': train_counts,
-        'X_val': X_val, 'y_val': y_val, 'val_counts': val_counts,
-        'X_test': X_test, 'y_test': y_test, 'test_counts': test_counts
+        'X_train': X_train, 'y_train': y_train,
+        'X_val': X_val, 'y_val': y_val,
+        'X_test': X_test, 'y_test': y_test
     }
 
 
@@ -216,11 +109,7 @@ def load_all_splits():
 # ============================================================================
 
 def balance_dataset(X, y):
-    """
-    Balance dataset by oversampling minority class (crying).
-
-    Why: Real world has ~90% non-cry, but we need ~50-50 for training
-    """
+    """Balance dataset by oversampling minority class (crying)."""
     cry_indices = np.where(y == 1)[0]
     non_cry_indices = np.where(y == 0)[0]
 
@@ -247,59 +136,105 @@ def balance_dataset(X, y):
 
 
 # ============================================================================
-# MODEL BUILDING (FIXED FOR ESP32)
+# MODEL BUILDING
 # ============================================================================
+
+def augment_mfcc(X, y):
+    """
+    Simple data augmentation for MFCC features.
+    Applies stronger time masking, frequency masking, and noise.
+    Only used during training — no impact on ESP32 inference.
+    """
+    X_aug = X.copy()
+    n_samples, n_frames, n_mfcc = X.shape
+    
+    augmented_X = [X]
+    augmented_y = [y]
+    
+    # Time masking: zero out random time segments
+    X_time_masked = X.copy()
+    for i in range(n_samples):
+        mask_len = np.random.randint(10, 30)  # mask 10-30 frames
+        mask_start = np.random.randint(0, max(1, n_frames - mask_len))
+        X_time_masked[i, mask_start:mask_start + mask_len, :] = 0
+    augmented_X.append(X_time_masked)
+    augmented_y.append(y)
+    
+    # Frequency masking: zero out random MFCC bands
+    X_freq_masked = X.copy()
+    for i in range(n_samples):
+        mask_len = np.random.randint(1, 4)  # mask 1-3 coefficients
+        mask_start = np.random.randint(0, max(1, n_mfcc - mask_len))
+        X_freq_masked[i, :, mask_start:mask_start + mask_len] = 0
+    augmented_X.append(X_freq_masked)
+    augmented_y.append(y)
+    
+    # Add stronger gaussian noise
+    X_noisy = X + np.random.normal(0, 0.2, X.shape).astype(np.float32)
+    augmented_X.append(X_noisy)
+    augmented_y.append(y)
+    
+    X_combined = np.concatenate(augmented_X, axis=0)
+    y_combined = np.concatenate(augmented_y, axis=0)
+    
+    # Shuffle
+    indices = np.random.permutation(len(X_combined))
+    return X_combined[indices], y_combined[indices]
+
 
 def build_model(input_shape):
     """
-    Build CNN model for cry detection - FIXED FOR ESP32 COMPATIBILITY.
-
-    CHANGES FROM OLD VERSION:
-    ✓ Added explicit channel dimension in Input (not Reshape)
-    ✓ Used GlobalAveragePooling2D instead of Flatten
-    ✓ No dynamic reshaping
-    ✓ All static operations (NO STRIDED_SLICE, SHAPE, PACK)
-
-    Architecture:
-      - Input: (128, 13, 1) - explicit 4D shape with channel
-      - Conv2D 32 filters → Conv2D 64 filters
-      - Global average pooling (no Flatten!)
-      - Dense layers with dropout
-      - Sigmoid output (binary classification)
-
-    Total parameters: ~21K (fits on ESP32)
-    TFLite compatible: YES ✓
+    Build CNN model for ESP32 deployment with HEAVY regularization.
+    
+    Architecture (ESP32-compatible, NO MEAN/STRIDED_SLICE ops):
+      Input (128, 39, 1)  ← 13 MFCC + 13 delta + 13 delta-delta
+      - Conv2D(8, L2)   → BN → ReLU → MaxPool(2,2)
+      - Conv2D(16, L2)  → BN → ReLU → MaxPool(2,2)
+      - Conv2D(16, L2)  → BN → ReLU → MaxPool(2,2)
+      - Flatten()       → 1024 features
+      - Dense(32, L2)   → ReLU → Dropout(0.5)
+      - Dense(16, L2)   → ReLU → Dropout(0.5)
+      - Dense(1)        → Sigmoid
+    
+    Regularization: Heavy L2 (0.002) + strong Dropout (0.5)
     """
     
-    # CRITICAL: Use (128, 13, 1) as explicit input shape
-    # This avoids dynamic shape handling
+    l2_reg = regularizers.l2(0.002)
+    
     model = models.Sequential([
-        # Input with explicit channel dimension
-        # DO NOT use Reshape - this causes dynamic shape ops
-        layers.Input(shape=(128, 13, 1)),  # ← Already 4D, no Reshape!
+        # Input with explicit 4D shape
+        layers.Input(shape=input_shape),
 
-        # First convolutional block
-        layers.Conv2D(32, (3, 3), padding='same'),
+        # Conv Block 1 - 8 filters
+        layers.Conv2D(8, (3, 3), padding='same', kernel_regularizer=l2_reg),
         layers.BatchNormalization(),
         layers.Activation('relu'),
-        layers.MaxPooling2D((2, 1)),
+        layers.MaxPooling2D((2, 2)),
 
-        # Second convolutional block
-        layers.Conv2D(64, (3, 3), padding='same'),
+        # Conv Block 2 - 16 filters
+        layers.Conv2D(16, (3, 3), padding='same', kernel_regularizer=l2_reg),
         layers.BatchNormalization(),
         layers.Activation('relu'),
-        layers.MaxPooling2D((2, 1)),
+        layers.MaxPooling2D((2, 2)),
 
-        # Global pooling - NO Flatten!
-        # This avoids STRIDED_SLICE ops
-        layers.GlobalAveragePooling2D(),
+        # Conv Block 3 - 16 filters
+        layers.Conv2D(16, (3, 3), padding='same', kernel_regularizer=l2_reg),
+        layers.BatchNormalization(),
+        layers.Activation('relu'),
+        layers.MaxPooling2D((2, 2)),
+
+        # Flatten - Static reshape (NO MEAN, NO GlobalAvgPool!)
+        layers.Flatten(), 
         
-        # Dense layers
-        layers.Dense(32, activation='relu'),
-        layers.Dropout(0.3),
+        # Dense layers with strong dropout
+        layers.Dense(32, activation='relu', kernel_regularizer=l2_reg),
+        layers.Dropout(0.5),
+
+        layers.Dense(16, activation='relu', kernel_regularizer=l2_reg),
+        layers.Dropout(0.5),
 
         # Output
-        layers.Dense(1, activation='sigmoid')  # Binary classification
+        layers.Dense(1, activation='sigmoid')
     ])
 
     return model
@@ -310,36 +245,23 @@ def build_model(input_shape):
 # ============================================================================
 
 def train_model(X_train, X_val, y_train, y_val):
-    """
-    Train the CNN model.
-
-    Args:
-        X_train, y_train: Training data (128, 13) 2D
-        X_val, y_val: Validation data
-        
-    Returns:
-        model: Trained model
-        history: Training history
-    """
+    """Train the CNN model."""
 
     log_message("\n" + "=" * 70)
-    log_message("TRAINING CNN MODEL (ESP32-COMPATIBLE)")
+    log_message("TRAINING CNN MODEL")
     log_message("=" * 70)
 
-    # Add channel dimension to data
-    # Input from MFCC: (n_samples, 128, 13)
-    # Model expects: (n_samples, 128, 13, 1)
-    X_train = np.expand_dims(X_train, axis=-1)  # Add channel dim
-    X_val = np.expand_dims(X_val, axis=-1)      # Add channel dim
+    # Add channel dimension
+    X_train = np.expand_dims(X_train, axis=-1)
+    X_val = np.expand_dims(X_val, axis=-1)
     
-    log_message(f"\nData shapes after adding channel dimension:")
+    log_message(f"\nData shapes with channel dimension:")
     log_message(f"  X_train: {X_train.shape}")
     log_message(f"  X_val: {X_val.shape}")
 
-    input_shape = (128, 13, 1)
+    input_shape = (X_train.shape[1], X_train.shape[2], 1)
     model = build_model(input_shape)
 
-    # Compile
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss='binary_crossentropy',
@@ -351,24 +273,39 @@ def train_model(X_train, X_val, y_train, y_val):
     log_message("\nModel Architecture:")
     model.summary()
 
-    # Class weights
-    class_weights = {0: 1.0, 1: 1.5}
-
+    # No class weights needed - data is already balanced (~50/50)
     log_message(f"\nTraining Configuration:")
     log_message(f"  Epochs:        {EPOCHS}")
     log_message(f"  Batch size:    {BATCH_SIZE}")
     log_message(f"  Learning rate: {LEARNING_RATE}")
-    log_message(f"  Class weights: {class_weights}")
+    log_message(f"  Early stop patience: {PATIENCE_EARLY_STOP}")
+    log_message(f"  LR reduce patience:  {PATIENCE_LR_REDUCE}")
+
+    # Callbacks
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=PATIENCE_EARLY_STOP,
+            restore_best_weights=True,
+            verbose=1
+        ),
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=PATIENCE_LR_REDUCE,
+            min_lr=1e-6,
+            verbose=1
+        )
+    ]
 
     log_message(f"\nStarting training...")
 
-    # Train
     history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        class_weight=class_weights,
+        callbacks=callbacks,
         verbose=1
     )
 
@@ -380,34 +317,36 @@ def train_model(X_train, X_val, y_train, y_val):
 # ============================================================================
 
 def evaluate_model(model, X_test, y_test):
-    """
-    Evaluate model on test set.
-
-    Args:
-        model: Trained model
-        X_test, y_test: Test data (128, 13) 2D
-
-    Returns:
-        metrics: dict with F1, precision, recall
-    """
+    """Evaluate model on test set."""
 
     log_message("\n" + "=" * 70)
-    log_message("EVALUATION ON TEST SET (ICSD Real Data)")
+    log_message("EVALUATION ON TEST SET")
     log_message("=" * 70)
 
-    # Add channel dimension
     X_test = np.expand_dims(X_test, axis=-1)
     
     log_message(f"\nX_test shape: {X_test.shape}")
 
     # Get predictions
     y_pred_probs = model.predict(X_test).flatten()
-    y_pred = (y_pred_probs > 0.5).astype(int)
+    y_pred = (y_pred_probs > 0.35).astype(int)
+
+    # ==================== DIAGNOSTIC: Prediction Analysis ===================
+    log_message(f"\n--- DIAGNOSTIC: Prediction Analysis ---")
+    log_message(f"  Prediction distribution: {np.unique(y_pred, return_counts=True)}")
+    log_message(f"  Actual label distribution: {np.unique(y_test, return_counts=True)}")
+    log_message(f"  Pred probabilities: min={y_pred_probs.min():.4f}, max={y_pred_probs.max():.4f}, "
+                f"mean={y_pred_probs.mean():.4f}, std={y_pred_probs.std():.4f}")
+    log_message(f"  Predicted as Snoring (0): {np.sum(y_pred == 0)}")
+    log_message(f"  Predicted as Crying  (1): {np.sum(y_pred == 1)}")
+    if y_pred_probs.std() < 0.01:
+        log_message(f"  ⚠ WARNING: All predictions are nearly identical — model did not learn!")
+    # ==================== END DIAGNOSTIC ====================================
 
     # Calculate metrics
-    f1 = f1_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
 
     log_message(f"\nMetrics:")
     log_message(f"  F1 Score:  {f1:.4f}")
@@ -436,30 +375,26 @@ def evaluate_model(model, X_test, y_test):
 # ============================================================================
 
 def save_model(model, metrics):
-    """Save trained model and results"""
+    """Save trained model and results."""
 
-    # Save model
-    model_path = MODELS_DIR / "cnn_model.h5"
+    model_path = MODELS_DIR / "cnn_model-v2.h5"
     model.save(model_path)
     log_message(f"\n✓ Model saved to {model_path}")
 
-    # Save metrics
-    metrics_path = MODELS_DIR / "training_metrics.json"
+    metrics_path = MODELS_DIR / "training_metrics-v2.json"
     metrics_to_save = {
         'f1_score': float(metrics['f1']),
         'precision': float(metrics['precision']),
         'recall': float(metrics['recall']),
         'timestamp': datetime.now().isoformat(),
         'config': {
-            'sampling_rate': SAMPLING_RATE,
-            'n_mfcc': N_MFCC,
-            'frames_per_sample': FRAMES_PER_SAMPLE,
             'epochs': EPOCHS,
             'batch_size': BATCH_SIZE,
             'learning_rate': LEARNING_RATE
         },
         'esp32_compatible': True,
-        'architecture': 'Simple CNN with GlobalAveragePooling2D (NO Flatten)'
+        'architecture': 'CNN with Flatten (32/64 filters, MaxPool 2,1) - NO MEAN ops',
+        'note': 'Uses preprocessed features from ../data/processed/'
     }
 
     with open(metrics_path, 'w') as f:
@@ -475,23 +410,20 @@ def save_model(model, metrics):
 # ============================================================================
 
 def main():
-    """Main training pipeline"""
+    """Main training pipeline."""
 
     log_message("=" * 70)
-    log_message("ICSD CRY DETECTION - TRAINING PIPELINE (ESP32 COMPATIBLE)")
+    log_message("CRY DETECTION MODEL TRAINING")
+    log_message("Using Preprocessed Features")
     log_message("=" * 70)
 
-    # Check if dataset exists
-    if not DATA_DIR.exists():
-        log_message(f"\nERROR: Dataset not found at {DATA_DIR}")
-        log_message(f"Please ensure your dataset is placed in the 'data/raw/model 1/audio' directory.")
-        return
-
-    # Load data
+    # Load preprocessed data
     data = load_all_splits()
     if data is None:
-        log_message("\nFailed to load data. Exiting.")
-        return
+        log_message("\n✗ Failed to load preprocessed data")
+        log_message("\nRun feature extraction first:")
+        log_message("  python 1_extract_features.py")
+        return False
 
     X_train = data['X_train']
     y_train = data['y_train']
@@ -500,11 +432,66 @@ def main():
     X_test = data['X_test']
     y_test = data['y_test']
 
+    # ==================== DIAGNOSTIC: Data Sanity Checks ====================
+    log_message("\n" + "=" * 70)
+    log_message("DIAGNOSTIC: DATA SANITY CHECKS")
+    log_message("=" * 70)
+
+    log_message(f"\n  Label distribution (TRAIN): {np.unique(y_train, return_counts=True)}")
+    log_message(f"  Label distribution (VAL):   {np.unique(y_val, return_counts=True)}")
+    log_message(f"  Label distribution (TEST):  {np.unique(y_test, return_counts=True)}")
+
+    log_message(f"\n  X_train stats: mean={X_train.mean():.4f}, std={X_train.std():.4f}, "
+                f"min={X_train.min():.4f}, max={X_train.max():.4f}")
+    log_message(f"  X_train has NaN? {np.isnan(X_train).any()}")
+    log_message(f"  X_train has Inf? {np.isinf(X_train).any()}")
+    log_message(f"  X_train all zeros? {(X_train == 0).all()}")
+    log_message(f"  X_train shape: {X_train.shape}")
+
+    # Check if all samples look the same (features not discriminative)
+    if len(X_train) > 1:
+        sample_variance = np.var(X_train, axis=0).mean()
+        log_message(f"  Mean variance across samples: {sample_variance:.6f}")
+        if sample_variance < 1e-6:
+            log_message("  ⚠ WARNING: Features have near-zero variance — model cannot learn!")
+    # ==================== END DIAGNOSTIC ====================================
+
+    # ==================== FEATURE NORMALIZATION =============================
+    log_message("\n" + "=" * 70)
+    log_message("NORMALIZING FEATURES")
+    log_message("=" * 70)
+
+    train_mean = X_train.mean(axis=0)
+    train_std = X_train.std(axis=0) + 1e-8  # avoid division by zero
+
+    X_train = (X_train - train_mean) / train_std
+    X_val = (X_val - train_mean) / train_std
+    X_test = (X_test - train_mean) / train_std
+
+    log_message(f"  X_train after norm: mean={X_train.mean():.4f}, std={X_train.std():.4f}")
+    log_message(f"  X_val   after norm: mean={X_val.mean():.4f}, std={X_val.std():.4f}")
+    log_message(f"  X_test  after norm: mean={X_test.mean():.4f}, std={X_test.std():.4f}")
+
+    # Save normalization stats for inference later
+    norm_path = MODELS_DIR / "normalization_stats-v2.npz"
+    np.savez(norm_path, mean=train_mean, std=train_std)
+    log_message(f"  ✓ Normalization stats saved to {norm_path}")
+    # ==================== END NORMALIZATION =================================
+
     # Balance training set
     log_message("\n" + "=" * 70)
     log_message("BALANCING TRAINING SET")
     log_message("=" * 70)
     X_train, y_train = balance_dataset(X_train, y_train)
+
+    # Data augmentation (training only — no impact on ESP32 model)
+    log_message("\n" + "=" * 70)
+    log_message("DATA AUGMENTATION")
+    log_message("=" * 70)
+    log_message(f"  Before augmentation: {X_train.shape[0]} samples")
+    X_train, y_train = augment_mfcc(X_train, y_train)
+    log_message(f"  After augmentation:  {X_train.shape[0]} samples (4x)")
+    log_message(f"  Label distribution:  {np.unique(y_train, return_counts=True)}")
 
     # Train model
     model, history = train_model(X_train, X_val, y_train, y_val)
@@ -525,5 +512,11 @@ def main():
     log_message(f"  Recall:    {metrics['recall']:.4f}")
     log_message(f"\nModel saved to: {model_path}")
 
+    
+
+    return True
+
+
 if __name__ == "__main__":
-    main()
+    success = main()
+    exit(0 if success else 1)

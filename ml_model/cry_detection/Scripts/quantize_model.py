@@ -9,8 +9,8 @@ from pathlib import Path
 # ============================================================================
 
 MODELS_DIR = Path(__file__).parent.parent / "models" / "cry_detection"
-INPUT_MODEL = MODELS_DIR / "cnn_model.h5"
-OUTPUT_MODEL = MODELS_DIR / "cnn_model.tflite"
+INPUT_MODEL = MODELS_DIR / "cnn_model_v1.h5"
+OUTPUT_MODEL = MODELS_DIR / "cnn_model_v1.tflite"
 
 # ============================================================================
 # QUANTIZE MODEL
