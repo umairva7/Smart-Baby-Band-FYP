@@ -223,41 +223,6 @@ except Exception as e:
 # FINAL SUMMARY
 # ============================================================================
 
-print("\n" + "=" * 70)
-print("SUMMARY")
-print("=" * 70)
-
-print(f"""
-✓ Model re-exported successfully!
-
-NEW FILE: {output_filename}
-  Size: {len(tflite_model) / 1024:.1f} KB
-  Format: TFLite Micro compatible
-  Status: Ready for ESP32
-
-NEXT STEPS:
-  1. ✓ Re-export complete
-  2. Share {output_filename} with hardware lead
-  3. Hardware lead uploads to ESP32
-  4. Test inference on device
-  5. Verify accuracy on real audio
-
-IMPORTANT:
-  - Original model (cnn_model.h5) kept unchanged
-  - Use {output_filename} for ESP32 only
-  - Input shape: (1, 128, 13)
-  - Output: probability (0.0-1.0)
-  - Threshold: 0.5 (cry if > 0.5)
-
-EXPECTED RESULT:
-  Hardware will get:
-    ✓ No tensor allocation errors
-    ✓ No missing op errors
-    ✓ Model loads successfully
-    ✓ Inference runs correctly
-    ✓ Cry detection works!
-""")
-
 print("=" * 70)
 print("✓ FIX COMPLETE - Ready to deploy!")
 print("=" * 70)

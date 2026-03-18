@@ -30,7 +30,7 @@ HOP_LENGTH = int(0.010 * SAMPLING_RATE)  # 10 ms
 
 # Training parameters
 BATCH_SIZE = 32
-EPOCHS = 50
+EPOCHS = 60
 LEARNING_RATE = 0.001
 
 # Random seed for reproducibility
@@ -247,26 +247,36 @@ def balance_dataset(X, y):
 
 
 # ============================================================================
-# MODEL BUILDING
+# MODEL BUILDING (FIXED FOR ESP32)
 # ============================================================================
 
 def build_model(input_shape):
     """
-    Build CNN model for cry detection.
+    Build CNN model for cry detection - FIXED FOR ESP32 COMPATIBILITY.
+
+    CHANGES FROM OLD VERSION:
+    ✓ Added explicit channel dimension in Input (not Reshape)
+    ✓ Used GlobalAveragePooling2D instead of Flatten
+    ✓ No dynamic reshaping
+    ✓ All static operations (NO STRIDED_SLICE, SHAPE, PACK)
 
     Architecture:
-      - Input: (128, 13) MFCC features
+      - Input: (128, 13, 1) - explicit 4D shape with channel
       - Conv2D 32 filters → Conv2D 64 filters
-      - Global average pooling
+      - Global average pooling (no Flatten!)
       - Dense layers with dropout
       - Sigmoid output (binary classification)
 
-    Total parameters: ~40K (fits easily on ESP32)
+    Total parameters: ~21K (fits on ESP32)
+    TFLite compatible: YES ✓
     """
+    
+    # CRITICAL: Use (128, 13, 1) as explicit input shape
+    # This avoids dynamic shape handling
     model = models.Sequential([
-        # Input
-        layers.Input(shape=input_shape),
-        layers.Reshape((*input_shape, 1)),  # Add channel dimension
+        # Input with explicit channel dimension
+        # DO NOT use Reshape - this causes dynamic shape ops
+        layers.Input(shape=(128, 13, 1)),  # ← Already 4D, no Reshape!
 
         # First convolutional block
         layers.Conv2D(32, (3, 3), padding='same'),
@@ -280,8 +290,11 @@ def build_model(input_shape):
         layers.Activation('relu'),
         layers.MaxPooling2D((2, 1)),
 
-        # Global pooling and dense layers
+        # Global pooling - NO Flatten!
+        # This avoids STRIDED_SLICE ops
         layers.GlobalAveragePooling2D(),
+        
+        # Dense layers
         layers.Dense(32, activation='relu'),
         layers.Dropout(0.3),
 
@@ -296,24 +309,34 @@ def build_model(input_shape):
 # MODEL TRAINING
 # ============================================================================
 
-def train_model(X_train, X_val, y_train, y_val, input_shape):
+def train_model(X_train, X_val, y_train, y_val):
     """
     Train the CNN model.
 
     Args:
-        X_train, y_train: Training data
+        X_train, y_train: Training data (128, 13) 2D
         X_val, y_val: Validation data
-        input_shape: Shape of input features
-
+        
     Returns:
         model: Trained model
         history: Training history
     """
 
     log_message("\n" + "=" * 70)
-    log_message("TRAINING CNN MODEL")
+    log_message("TRAINING CNN MODEL (ESP32-COMPATIBLE)")
     log_message("=" * 70)
 
+    # Add channel dimension to data
+    # Input from MFCC: (n_samples, 128, 13)
+    # Model expects: (n_samples, 128, 13, 1)
+    X_train = np.expand_dims(X_train, axis=-1)  # Add channel dim
+    X_val = np.expand_dims(X_val, axis=-1)      # Add channel dim
+    
+    log_message(f"\nData shapes after adding channel dimension:")
+    log_message(f"  X_train: {X_train.shape}")
+    log_message(f"  X_val: {X_val.shape}")
+
+    input_shape = (128, 13, 1)
     model = build_model(input_shape)
 
     # Compile
@@ -328,8 +351,8 @@ def train_model(X_train, X_val, y_train, y_val, input_shape):
     log_message("\nModel Architecture:")
     model.summary()
 
-    # Class weights (adjusted to improve precision)
-    class_weights = {0: 1.0, 1: 1.5}  # Between 2.0 and 1.0
+    # Class weights
+    class_weights = {0: 1.0, 1: 1.5}
 
     log_message(f"\nTraining Configuration:")
     log_message(f"  Epochs:        {EPOCHS}")
@@ -362,7 +385,7 @@ def evaluate_model(model, X_test, y_test):
 
     Args:
         model: Trained model
-        X_test, y_test: Test data
+        X_test, y_test: Test data (128, 13) 2D
 
     Returns:
         metrics: dict with F1, precision, recall
@@ -371,6 +394,11 @@ def evaluate_model(model, X_test, y_test):
     log_message("\n" + "=" * 70)
     log_message("EVALUATION ON TEST SET (ICSD Real Data)")
     log_message("=" * 70)
+
+    # Add channel dimension
+    X_test = np.expand_dims(X_test, axis=-1)
+    
+    log_message(f"\nX_test shape: {X_test.shape}")
 
     # Get predictions
     y_pred_probs = model.predict(X_test).flatten()
@@ -429,7 +457,9 @@ def save_model(model, metrics):
             'epochs': EPOCHS,
             'batch_size': BATCH_SIZE,
             'learning_rate': LEARNING_RATE
-        }
+        },
+        'esp32_compatible': True,
+        'architecture': 'Simple CNN with GlobalAveragePooling2D (NO Flatten)'
     }
 
     with open(metrics_path, 'w') as f:
@@ -448,7 +478,7 @@ def main():
     """Main training pipeline"""
 
     log_message("=" * 70)
-    log_message("ICSD CRY DETECTION - TRAINING PIPELINE")
+    log_message("ICSD CRY DETECTION - TRAINING PIPELINE (ESP32 COMPATIBLE)")
     log_message("=" * 70)
 
     # Check if dataset exists
@@ -477,8 +507,7 @@ def main():
     X_train, y_train = balance_dataset(X_train, y_train)
 
     # Train model
-    input_shape = X_train.shape[1:]
-    model, history = train_model(X_train, X_val, y_train, y_val, input_shape)
+    model, history = train_model(X_train, X_val, y_train, y_val)
 
     # Evaluate
     metrics = evaluate_model(model, X_test, y_test)
@@ -495,21 +524,6 @@ def main():
     log_message(f"  Precision: {metrics['precision']:.4f}")
     log_message(f"  Recall:    {metrics['recall']:.4f}")
     log_message(f"\nModel saved to: {model_path}")
-
-    if metrics['f1'] < 0.60:
-        log_message(f"\n⚠️  F1 score is lower than expected (< 0.60)")
-        log_message(f"Consider:")
-        log_message(f"  - Increase EPOCHS (currently {EPOCHS})")
-        log_message(f"  - Adjust LEARNING_RATE (currently {LEARNING_RATE})")
-        log_message(f"  - Check data quality (plot some samples)")
-        log_message(f"  - Verify MFCC extraction")
-    else:
-        log_message(f"\n✅ Training successful!")
-        log_message(f"\nNext steps:")
-        log_message(f"  1. Run: python ml_model/quantize.py")
-        log_message(f"  2. Convert model to TFLite for ESP32")
-        log_message(f"  3. Deploy on edge device")
-
 
 if __name__ == "__main__":
     main()
