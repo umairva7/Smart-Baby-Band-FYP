@@ -1,228 +1,113 @@
 #!/usr/bin/env python3
-"""
-FIX: Re-export CNN model for ESP32 compatibility
-
-PROBLEM:
-  - Current .tflite has unsupported ops (SHAPE, STRIDED_SLICE, etc)
-  - These don't work on ESP32 TFLite Micro
-  
-SOLUTION:
-  - Re-export using ONLY TFLITE_BUILTINS
-  - Verify ops list
-  - Generate compatible .tflite file
-
-REQUIRED:
-  - Original trained model (cnn_model.h5)
-  - TensorFlow installed
-"""
 
 import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, BatchNormalization, Activation
 import numpy as np
 
 print("=" * 70)
-print("MODEL FIX: Re-export for ESP32 Compatibility")
+print("BUILDING FULLY CONVOLUTIONAL SEQUENTIAL MODEL (KERAS 3 FIX)")
 print("=" * 70)
 
-# ============================================================================
-# STEP 1: Load original trained model
-# ============================================================================
+print("\n[1/5] Loading original weights...")
+old_model = tf.keras.models.load_model("../models/cry_detection/cnn_model_v1.h5")
 
-print("\n[1/5] Loading original model...")
+print("\n[2/5] Architecting Fully Convolutional Graph via Sequential API...")
+# Keras 3 often crashes on converting Functional models, so we convert the FCN
+# back into a Sequential model.
+model = Sequential([
+    # Block 1
+    tf.keras.Input(batch_shape=(1, 128, 39, 1)),
+    Conv2D(8, (3, 3), padding='same'),
+    BatchNormalization(),
+    Activation('relu'),
+    MaxPooling2D((2, 2)),
+
+    # Block 2
+    Conv2D(16, (3, 3), padding='same'),
+    BatchNormalization(),
+    Activation('relu'),
+    MaxPooling2D((2, 2)),
+
+    # Block 3
+    Conv2D(16, (3, 3), padding='same'),
+    BatchNormalization(),
+    Activation('relu'),
+    MaxPooling2D((2, 2)),
+
+    # --- THE ABSOLUTE FIX ---
+    # Instead of flattening, we physically compress the spatial dimensions 
+    # executing a Conv2D with a (16, 4) kernel. Mathematically mirrors Dense.
+    Conv2D(32, (16, 4), padding='valid', activation='relu'),
+
+    # Apply 1x1 convolutions which mimic fully-connected layers purely natively
+    Conv2D(16, (1, 1), padding='valid', activation='relu'),
+    Conv2D(1, (1, 1), padding='valid', activation='sigmoid')
+])
+
+print("\n[3/5] Transplanting and reshaping trained weights to Convolutional format...")
+# Carefully extract weights from only the layers in the old and new models that have them.
+old_weights = [layer.get_weights() for layer in old_model.layers if len(layer.get_weights()) > 0]
+new_weight_layers = [layer for layer in model.layers if len(layer.get_weights()) > 0]
+
+# 0-5 are the standard Conv2D and BatchNormalization layers which haven't changed shape
+for i in range(6):
+    new_weight_layers[i].set_weights(old_weights[i])
+
+# 6 is Dense(32) -> Conv2D(32) kernel and bias
+old_dense_1_w, old_dense_1_b = old_weights[6]
+# Shape map: (1024, 32) -> (16, 4, 16, 32)
+new_conv_1_w = old_dense_1_w.reshape(16, 4, 16, 32)
+new_weight_layers[6].set_weights([new_conv_1_w, old_dense_1_b])
+
+# 7 is Dense(16) -> Conv2D(16) kernel and bias
+old_dense_2_w, old_dense_2_b = old_weights[7]
+# Shape map: (32, 16) -> (1, 1, 32, 16)
+new_conv_2_w = old_dense_2_w.reshape(1, 1, 32, 16)
+new_weight_layers[7].set_weights([new_conv_2_w, old_dense_2_b])
+
+# 8 is Dense(1) -> Conv2D(1) kernel and bias
+old_dense_3_w, old_dense_3_b = old_weights[8]
+# Shape map: (16, 1) -> (1, 1, 16, 1)
+new_conv_3_w = old_dense_3_w.reshape(1, 1, 16, 1)
+new_weight_layers[8].set_weights([new_conv_3_w, old_dense_3_b])
+
+print("\n[4/5] Executing precise TFLite conversion parameters from Hardware PDF...")
+# KERAS 3 BUG WORKAROUND:
+# from_keras_model() crashes with "NoneType object is not callable" in modern Keras 3 environments.
+# To bypass, we serialize the raw TensorFlow graph to disk and load it back without Keras AST tracking.
+export_dir = "temp_saved_model"
 try:
-    model = tf.keras.models.load_model("../models/cry_detection/cnn_model_v1.h5")
-    print("✓ Model loaded successfully")
-except Exception as e:
-    print(f"✗ Error loading model: {e}")
-    print("Make sure cnn_model.h5 is in current directory")
-    exit(1)
+    model.export(export_dir)
+except AttributeError:
+    model.save(export_dir)
 
-# Print model info
-print(f"  Model input shape: {model.input_shape}")
-print(f"  Model output shape: {model.output_shape}")
+converter = tf.lite.TFLiteConverter.from_saved_model(export_dir)
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
 
-# ============================================================================
-# STEP 2: Create converter with ONLY supported ops
-# ============================================================================
+# Because our FCN completely eliminated the Flatten() layer natively, we can now safely
+# use the default MLIR new converter without fear of SHAPE/PACK injection!
+# This is required because from_saved_model crashes if experimental_new_converter=False
+converter.experimental_new_converter = True
 
-print("\n[2/5] Creating TFLite converter...")
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
-
-# CRITICAL: Only allow TFLite Micro supported operations
-print("  Setting supported ops to TFLITE_BUILTINS only...")
-converter.target_spec.supported_ops = [
-    tf.lite.OpsSet.TFLITE_BUILTINS
-]
-
-# Optional: Enable optimization (recommended)
-print("  Enabling optimization...")
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-# Ensure float input/output (important for MFCC preprocessing)
 converter.inference_input_type = tf.float32
 converter.inference_output_type = tf.float32
 
-print("✓ Converter configured correctly")
+tflite_model = converter.convert()
 
-# ============================================================================
-# STEP 3: Convert to TFLite
-# ============================================================================
-
-print("\n[3/5] Converting model to TFLite...")
-try:
-    tflite_model = converter.convert()
-    print(f"✓ Conversion successful")
-    print(f"  Converted model size: {len(tflite_model) / 1024:.1f} KB")
-except Exception as e:
-    print(f"✗ Conversion failed: {e}")
-    print("\nPossible solutions:")
-    print("  1. Check if model has Lambda layers (not supported)")
-    print("  2. Check if model has custom operations")
-    print("  3. Verify model was built correctly")
-    exit(1)
-
-# ============================================================================
-# STEP 4: Save the fixed model
-# ============================================================================
-
-print("\n[4/5] Saving fixed model...")
 output_filename = "cnn_model_fixed.tflite"
-try:
-    with open(output_filename, "wb") as f:
-        f.write(tflite_model)
-    print(f"✓ Model saved to: {output_filename}")
-    print(f"  File size: {len(tflite_model) / 1024:.1f} KB")
-except Exception as e:
-    print(f"✗ Error saving model: {e}")
-    exit(1)
-
-# ============================================================================
-# STEP 5: Verify supported operations
-# ============================================================================
-
-print("\n[5/5] Verifying supported operations...")
-print("  Loading interpreter...")
-
-try:
-    interpreter = tf.lite.Interpreter(model_path=output_filename)
-    interpreter.allocate_tensors()
-    print("✓ Interpreter loaded successfully!")
-except Exception as e:
-    print(f"✗ Error loading interpreter: {e}")
-    print("  Model may still have compatibility issues")
-    exit(1)
-
-# Get operation details
-print("\n  Operations in model:")
-ops_found = set()
-has_unsupported = False
-
-try:
-    # Method 1: Get details (works in newer TF)
-    for details in interpreter._get_tensor_details():
-        if 'quantization' in details:
-            print(f"    - Tensor: {details['name']}")
+with open(output_filename, "wb") as f:
+    f.write(tflite_model)
     
-    # Method 2: Check layer names for operations
-    for i in range(interpreter.get_tensor_details().__len__()):
-        tensor = interpreter.get_tensor_details()[i]
-        ops_found.add(tensor.get('name', 'unknown'))
-    
-except:
-    print("    (Unable to extract detailed op list)")
-
-# List of supported operations
-SUPPORTED_OPS = [
-    'CONV_2D',
-    'DEPTHWISE_CONV_2D',
-    'FULLY_CONNECTED',
-    'SOFTMAX',
-    'RESHAPE',
-    'MAX_POOL_2D',
-    'BATCH_NORM',
-    'ADD',
-    'MUL',
-    'RELU'
-]
-
-# List of unsupported operations (that would cause errors)
-UNSUPPORTED_OPS = [
-    'STRIDED_SLICE',
-    'SHAPE',
-    'PACK',
-    'GATHER',
-    'DYNAMIC_SLICE'
-]
-
-print(f"\n  Supported operations: {', '.join(SUPPORTED_OPS)}")
-print(f"\n  Checking for unsupported operations...")
-
-# Try to get op list
-try:
-    # Get input and output tensor details
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    print(f"\n  Input tensor:")
-    print(f"    Shape: {input_details[0]['shape']}")
-    print(f"    Type: {input_details[0]['dtype']}")
-    
-    print(f"\n  Output tensor:")
-    print(f"    Shape: {output_details[0]['shape']}")
-    print(f"    Type: {output_details[0]['dtype']}")
-    
-    print("\n✓ Tensors allocated successfully!")
-    
-except Exception as e:
-    print(f"✗ Error checking tensors: {e}")
-
-# ============================================================================
-# STEP 6: Test inference (optional)
-# ============================================================================
+print(f"\n[5/5] ✓ Model exported beautifully to {output_filename} ({len(tflite_model) / 1024:.1f} KB)")
 
 print("\n" + "=" * 70)
-print("OPTIONAL: Testing inference with dummy input")
+print("FINAL HARDWARE TEAM VERIFICATION (OP LIST)")
 print("=" * 70)
-
-try:
-    # Get input shape
-    input_details = interpreter.get_input_details()
-    input_shape = input_details[0]['shape']
-    
-    print(f"\nInput shape required: {input_shape}")
-    
-    # Create dummy MFCC input to match your V1 model shape
-    # 1 batch, 128 frames, 39 features (MFCC+Delta+Delta^2), 1 channel
-    dummy_input = np.random.randn(1, 128, 39, 1).astype(np.float32)
-    
-    print(f"Created dummy input shape: {dummy_input.shape}")
-    
-    # Run inference
-    print("\nRunning test inference...")
-    interpreter.set_tensor(input_details[0]['index'], dummy_input)
-    interpreter.invoke()
-    
-    # Get output
-    output_details = interpreter.get_output_details()
-    output = interpreter.get_tensor(output_details[0]['index'])
-    
-    print(f"✓ Inference successful!")
-    print(f"  Output: {output}")
-    print(f"  Output shape: {output.shape}")
-    print(f"  Output value (probability): {output[0][0]:.4f}")
-    
-    if 0.0 <= output[0][0] <= 1.0:
-        print(f"✓ Output is in valid range [0, 1]")
-    else:
-        print(f"⚠ Warning: Output outside expected range [0, 1]")
-    
-except Exception as e:
-    print(f"⚠ Test inference failed: {e}")
-    print("  This might be okay if model architecture is complex")
-
-# ============================================================================
-# FINAL SUMMARY
-# ============================================================================
-
-print("=" * 70)
-print("✓ FIX COMPLETE - Ready to deploy!")
-print("=" * 70)
+interpreter = tf.lite.Interpreter(model_path=output_filename)
+interpreter.allocate_tensors()
+for op in interpreter._get_ops_details():
+    # Ignore the dynamic DELEGATE nodes inserted by PC interpreters, 
+    # we just want the raw model ops intended for ESP32.
+    if op['op_name'] != "DELEGATE":
+        print(f"✔ {op['op_name']}")
