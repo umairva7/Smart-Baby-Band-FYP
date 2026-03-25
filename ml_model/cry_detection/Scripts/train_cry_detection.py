@@ -12,7 +12,7 @@ from datetime import datetime
 # CONFIGURATION
 # ============================================================================
 
-PROCESSED_DIR = Path("../data/processed")
+PROCESSED_DIR = Path("../data/processed_v2")
 MODELS_DIR = Path("../models/cry_detection")
 LOGS_DIR = Path("../logs")
 
@@ -456,27 +456,16 @@ def main():
             log_message("  ⚠ WARNING: Features have near-zero variance — model cannot learn!")
     # ==================== END DIAGNOSTIC ====================================
 
-    # ==================== FEATURE NORMALIZATION =============================
+    # ==================== NO NORMALIZATION ==================================
+    # ESP32 does NOT normalize MFCCs before inference.
+    # Training on raw values ensures the model sees the same distribution
+    # as the ESP32 will feed it at runtime.
     log_message("\n" + "=" * 70)
-    log_message("NORMALIZING FEATURES")
+    log_message("NORMALIZATION: SKIPPED (ESP32-matched pipeline)")
     log_message("=" * 70)
-
-    train_mean = X_train.mean(axis=0)
-    train_std = X_train.std(axis=0) + 1e-8  # avoid division by zero
-
-    X_train = (X_train - train_mean) / train_std
-    X_val = (X_val - train_mean) / train_std
-    X_test = (X_test - train_mean) / train_std
-
-    log_message(f"  X_train after norm: mean={X_train.mean():.4f}, std={X_train.std():.4f}")
-    log_message(f"  X_val   after norm: mean={X_val.mean():.4f}, std={X_val.std():.4f}")
-    log_message(f"  X_test  after norm: mean={X_test.mean():.4f}, std={X_test.std():.4f}")
-
-    # Save normalization stats for inference later
-    norm_path = MODELS_DIR / "normalization_stats-v2.npz"
-    np.savez(norm_path, mean=train_mean, std=train_std)
-    log_message(f"  ✓ Normalization stats saved to {norm_path}")
-    # ==================== END NORMALIZATION =================================
+    log_message(f"  X_train raw stats: mean={X_train.mean():.4f}, std={X_train.std():.4f}")
+    log_message(f"  X_train range: [{X_train.min():.2f}, {X_train.max():.2f}]")
+    # ==================== END NO NORMALIZATION ==============================
 
     # Balance training set
     log_message("\n" + "=" * 70)

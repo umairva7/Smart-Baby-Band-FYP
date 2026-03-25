@@ -10,7 +10,7 @@ print("BUILDING FULLY CONVOLUTIONAL SEQUENTIAL MODEL (KERAS 3 FIX)")
 print("=" * 70)
 
 print("\n[1/5] Loading original weights...")
-old_model = tf.keras.models.load_model("../models/cry_detection/cnn_model_v1.h5")
+old_model = tf.keras.models.load_model("../models/cry_detection/cnn_model-v2.h5")
 
 print("\n[2/5] Architecting Fully Convolutional Graph via Sequential API...")
 # Keras 3 often crashes on converting Functional models, so we convert the FCN
