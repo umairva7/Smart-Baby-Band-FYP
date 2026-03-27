@@ -28,7 +28,7 @@ The hardware architecture integrates multiple biomedical and environmental senso
 
 ### Core Microcontroller
 
-**ESP32 Development Board**
+#### ESP32 Development Board
 
 * Dual-core processor
 * Built-in WiFi & BLE
@@ -108,7 +108,7 @@ Power optimization strategies implemented:
 2. ESP32 reads sensor data via I2C/I2S
 3. Basic preprocessing performed (noise filtering, sampling control)
 4. Data formatted into structured JSON packets
-5. MQTT publish to cloud endpoint
+5. MQTT publish over WiFi to AWS IoT Core endpoint
 
 ---
 

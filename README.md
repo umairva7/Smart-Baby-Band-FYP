@@ -28,8 +28,8 @@ The objective is to assist parents in understanding baby needs through intellige
 
 1. Sensors collect physiological and environmental data.
 2. ESP32 processes signals and formats data packets.
-3. Data is transmitted securely via MQTT over WiFi.
-4. Cloud services (AWS IoT / Firebase) receive and store data.
+3. Data is transmitted securely via MQTT over WiFi to AWS IoT Core.
+4. AWS Lambda bridges sensor data to Firebase Firestore for storage and real-time syncing.
 5. AI models classify cry type and estimate sleep stage.
 6. Mobile application displays insights, alerts, and reports.
 
@@ -83,14 +83,16 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ### Communication Protocol
 
-* MQTT (Publish/Subscribe Model)
+* MQTT over WiFi (ESP32 to AWS IoT Core)
 * Secure TLS-based communication
+* REST APIs & Real-time Listeners (FastAPI & Flutter to Firebase)
 
-### Cloud Platforms
+### Cloud Platforms & Backend Setup
 
-* AWS IoT Core
-* Firebase Realtime Database
-* MongoDB Atlas (Cloud Database)
+* **AWS IoT Core**: Cloud MQTT broker for IoT devices
+* **AWS Lambda**: Serverless bridge between AWS IoT and Firebase
+* **Firebase (Firestore + Auth)**: Real-time database and secure user authentication
+* **FastAPI (Python)**: Core backend server for ML inference, analytics, and reporting
 
 ### Cloud Capabilities
 
@@ -130,7 +132,7 @@ The mobile application acts as the primary user interface for parents.
 ```text
 Smart-Baby-Band-FYP/
 ├── app/               # Flutter mobile app
-├── backend/           # Node.js backend (API + MongoDB)
+├── backend/           # FastAPI backend (Python + Firebase + AWS Lambda)
 ├── docs/              # Reports, diagrams, presentations
 ├── hardware/          # Hardware code (ESP32 + sensors)
 ├── ml_model/          # Cry detection model (datasets, training, inference)
@@ -145,7 +147,7 @@ Smart-Baby-Band-FYP/
 * Embedded Systems Engineering (ESP32)
 * IoT Architecture Design
 * MQTT Protocol Implementation
-* Cloud Computing (AWS IoT / Firebase / MongoDB)
+* Cloud Computing (AWS IoT Core / AWS Lambda / Firebase)
 * AI Model Development & Deployment
 * Edge Processing
 * Real-Time Data Streaming
