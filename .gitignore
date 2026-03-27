@@ -7,3 +7,11 @@ ml_model/models/*.h5
 ml_model/models/*.tflite
 node_modules/
 .env
+
+# IDEs
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
