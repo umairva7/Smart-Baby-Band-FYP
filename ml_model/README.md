@@ -7,7 +7,7 @@
 ## 📌 Overview
 
 This directory contains the machine learning pipeline used to train and export the cry classification model.
-The final model runs inference on an incoming set of audio features extracted by the ESP32 (such as MFCCs).
+The final model runs inference on an incoming set of audio features extracted by the ESP32 (such as MFCCs).Calisto MT
 
 ## 🛠️ Technology Stack
 
