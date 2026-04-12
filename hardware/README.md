@@ -7,40 +7,46 @@
 
 ## 📌 Hardware Overview
 
-The Smart Baby Band hardware system is a low-power IoT wearable device designed to collect physiological and environmental data from infants in real time.
+The **Smart Baby Band** is a low-power IoT wearable device designed to continuously monitor an infant’s physiological signals and environmental conditions in real time.
 
-The hardware architecture integrates multiple biomedical and environmental sensors with an ESP32 microcontroller to enable real-time monitoring, edge processing, and secure wireless communication.
+The system integrates multiple biomedical sensors with an **ESP32 microcontroller**, enabling:
+
+* Real-time data acquisition
+* Edge-level preprocessing
+* Secure cloud communication (AWS IoT)
+* Intelligent monitoring for cry detection and sleep analysis
 
 ---
 
 ## 🎯 Hardware Objectives
 
-* Capture baby cry audio using digital microphone
-* Monitor heart rate and pulse signals
+* Capture baby cry audio using a digital microphone
+* Monitor heart rate and pulse signals (real-time + averaged)
 * Track motion patterns for sleep detection
-* Measure temperature and humidity levels
-* Transmit processed data securely to cloud via WiFi
-* Maintain low power consumption for wearable use
+* Measure temperature and humidity for comfort monitoring
+* Transmit processed data securely to cloud via WiFi (MQTT)
+* Maintain low power consumption suitable for wearable usage
 
 ---
 
 ## 🧩 Hardware Architecture
 
-### Core Microcontroller
+### 🔹 Core Microcontroller
 
-#### ESP32 Development Board
+**ESP32 Development Board**
 
 * Dual-core processor
 * Built-in WiFi & BLE
-* I2S support for digital microphone
+* I2S support for digital audio
 * I2C communication for sensors
-* Low-power operating modes
+* Deep sleep & power optimization features
 
-The ESP32 acts as the central controller handling:
+### Responsibilities:
 
 * Sensor data acquisition
-* Signal preprocessing
-* MQTT communication
+* Signal preprocessing (filtering + averaging)
+* JSON data formatting
+* MQTT communication with AWS IoT
 * Power management
 
 ---
@@ -50,116 +56,173 @@ The ESP32 acts as the central controller handling:
 ### 🎤 INMP441 – Digital Microphone (I2S)
 
 * Captures baby cry audio
-* Connected via I2S interface
-* Provides digital audio stream to ESP32
+* High-quality digital output via I2S
 * Used for MFCC feature extraction
+* Input for ML-based cry classification
+
+---
 
 ### 💓 MAX30102 – Heart Rate Sensor
 
-* Optical pulse oximeter module
-* Measures heart rate and blood oxygen levels
-* Communicates via I2C
-* Used for sleep analysis and health monitoring
+* Optical pulse sensor
+* Measures heart rate (BPM) and SpO2
+* I2C communication
+* **Implemented Fix:**
+
+  * Handles zero-reading issue
+  * Uses **10-second averaging** for stable output
+
+---
 
 ### 💤 MPU6050 – Motion Sensor
 
 * 3-axis accelerometer + gyroscope
-* Detects body movement and posture changes
+* Detects movement, posture, and activity
 * Used for sleep stage estimation
-* Communicates via I2C
+* I2C communication
+
+---
 
 ### 🌡️ BME280 / DHT11 – Environmental Sensor
 
-* Measures temperature
-* Measures humidity
-* Used for comfort monitoring
+* Measures temperature and humidity
+* Used for baby comfort monitoring
+* **Improvement:**
+
+  * 10-second averaged readings for stability
 
 ---
 
 ## 🔌 Communication Interfaces
 
-| Interface | Used For                       |
-| --------- | ------------------------------ |
-| I2S       | Digital audio (INMP441)        |
-| I2C       | MAX30102, MPU6050, BME280      |
-| WiFi      | Cloud communication            |
-| BLE       | Mobile pairing (optional mode) |
+| Interface | Purpose                            |
+| --------- | ---------------------------------- |
+| I2S       | Digital audio input (INMP441)      |
+| I2C       | MAX30102, MPU6050, BME280          |
+| WiFi      | Cloud communication (AWS IoT Core) |
+| BLE       | Optional mobile pairing            |
 
 ---
 
 ## ⚡ Power System
 
 * Rechargeable battery-powered wearable
-* Voltage regulation for stable 3.3V operation
-* Optimized sleep modes in ESP32
-* Low-power sensor polling strategy
+* 3.3V regulated supply
+* Optimized for low power consumption
 
-Power optimization strategies implemented:
+### Power Optimization Techniques
 
-* Deep sleep when idle
+* ESP32 Deep Sleep mode
 * Controlled WiFi transmission intervals
-* Efficient sampling rates
+* Sensor sampling optimization
+* Batch data transmission instead of continuous streaming
 
 ---
 
 ## 📡 Data Handling Pipeline (Hardware Level)
 
 1. Sensors capture raw signals
-2. ESP32 reads sensor data via I2C/I2S
-3. Basic preprocessing performed (noise filtering, sampling control)
-4. Data formatted into structured JSON packets
-5. MQTT publish over WiFi to AWS IoT Core endpoint
+2. ESP32 reads data via I2C/I2S
+3. Preprocessing applied:
+
+   * Noise filtering
+   * Sampling control
+   * **10-second averaging (HR, Temp, Humidity)**
+4. Data structured into JSON format
+5. MQTT publish to AWS IoT Core
 
 ---
 
-## 🔐 Security at Hardware Level
+## 📦 Example JSON Payload
 
-* Secure WiFi connection
-* TLS-based MQTT communication
-* AWS IoT certificate-based device authentication
-* Secure key storage within device firmware
+```json
+{
+  "temperature_avg": 36.5,
+  "humidity_avg": 60,
+  "heart_rate_avg": 78,
+  "motion": "active",
+  "cry_detected": true,
+  "timestamp": "2026-04-10T12:00:00Z"
+}
+```
+
+---
+
+## 🔐 Security Implementation
+
+* Secure WiFi communication
+* TLS-based MQTT protocol
+* AWS IoT certificate-based authentication
+* Private key & certificate stored in firmware
 
 ---
 
 ## 🛠️ Firmware Responsibilities
 
 * Sensor initialization & calibration
-* Error handling & reconnection logic
-* Real-time data buffering
-* Watchdog timer integration
-* Fault tolerance & auto-restart handling
+* Error handling (sensor failure, reconnection)
+* Real-time buffering of sensor data
+* Watchdog timer implementation
+* Auto-restart on system failure
+* Stable data output using averaging techniques
 
 ---
 
-## 📊 Engineering Challenges Solved
+## 📊 Engineering Challenges & Solutions
 
-* Handling noisy audio input from infant environment
-* Managing multiple I2C devices on shared bus
-* Synchronizing I2S audio with sensor readings
-* Reducing latency in MQTT transmission
-* Maintaining battery efficiency in wearable form
+| Challenge             | Solution                                    |
+| --------------------- | ------------------------------------------- |
+| Noisy cry audio       | Digital filtering + ML preprocessing (MFCC) |
+| Heart rate showing 0  | Fixed sensor reading logic + averaging      |
+| Sensor instability    | 10-second averaging for reliable output     |
+| Multiple I2C devices  | Managed shared bus efficiently              |
+| Real-time constraints | Optimized sampling & processing             |
+| High power usage      | Deep sleep + controlled transmissions       |
 
 ---
 
 ## 🚀 Technical Skills Demonstrated
 
-* Embedded C/C++ Programming (ESP32)
-* I2C & I2S Protocol Implementation
-* Sensor Fusion Techniques
+* Embedded C/C++ (ESP32)
+* I2C & I2S Protocols
+* Sensor Integration & Calibration
 * Real-Time Data Processing
-* MQTT Protocol Integration
-* Low-Power IoT Design
-* Secure IoT Device Authentication
-* Hardware-Software System Integration
+* MQTT & AWS IoT Integration
+* Low-Power Embedded System Design
+* Secure IoT Communication (TLS, Certificates)
+* Hardware-Software Co-Design
+
+---
+
+## 🔄 Current Status
+
+✅ Cry detection working
+✅ Motion detection working
+✅ Sensor integration completed
+✅ Cloud communication (MQTT) working
+✅ Averaging implemented for stable readings
+
+🔄 In Progress:
+
+* ML model integration for cry classification
+* Sleep stage prediction logic
+* Mobile app real-time sync optimization
 
 ---
 
 ## 🏆 Summary
 
-The Smart Baby Band hardware system demonstrates a production-level embedded IoT architecture integrating biomedical sensors, digital audio processing, and secure wireless communication.
+The Smart Baby Band hardware system represents a **production-ready IoT wearable architecture**, combining:
 
-It reflects strong expertise in embedded systems engineering, IoT device design, and real-time hardware integration suitable for IoT, embedded, and edge-AI engineering roles.
+* Biomedical sensing
+* Digital audio processing
+* Secure cloud connectivity
+* Real-time embedded intelligence
+
+This project demonstrates strong capabilities in **embedded systems, IoT, and edge-AI engineering**, making it suitable for real-world healthcare and smart monitoring applications.
 
 ---
 
 📜 Academic Project – University of Central Punjab (2025)
+
+---
