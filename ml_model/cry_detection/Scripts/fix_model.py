@@ -17,28 +17,28 @@ print("\n[2/5] Architecting Fully Convolutional Graph via Sequential API...")
 # back into a Sequential model.
 model = Sequential([
     # Block 1
-    tf.keras.Input(batch_shape=(1, 128, 39, 1)),
-    Conv2D(8, (3, 3), padding='same'),
+    tf.keras.Input(batch_shape=(1, 128, 26, 1)),
+    Conv2D(16, (3, 3), padding='same'),
     BatchNormalization(),
     Activation('relu'),
     MaxPooling2D((2, 2)),
 
     # Block 2
-    Conv2D(16, (3, 3), padding='same'),
+    Conv2D(32, (3, 3), padding='same'),
     BatchNormalization(),
     Activation('relu'),
     MaxPooling2D((2, 2)),
 
     # Block 3
-    Conv2D(16, (3, 3), padding='same'),
+    Conv2D(32, (3, 3), padding='same'),
     BatchNormalization(),
     Activation('relu'),
     MaxPooling2D((2, 2)),
 
     # --- THE ABSOLUTE FIX ---
     # Instead of flattening, we physically compress the spatial dimensions 
-    # executing a Conv2D with a (16, 4) kernel. Mathematically mirrors Dense.
-    Conv2D(32, (16, 4), padding='valid', activation='relu'),
+    # executing a Conv2D with a (16, 3) kernel. Mathematically mirrors Dense.
+    Conv2D(32, (16, 3), padding='valid', activation='relu'),
 
     # Apply 1x1 convolutions which mimic fully-connected layers purely natively
     Conv2D(16, (1, 1), padding='valid', activation='relu'),
@@ -56,8 +56,8 @@ for i in range(6):
 
 # 6 is Dense(32) -> Conv2D(32) kernel and bias
 old_dense_1_w, old_dense_1_b = old_weights[6]
-# Shape map: (1024, 32) -> (16, 4, 16, 32)
-new_conv_1_w = old_dense_1_w.reshape(16, 4, 16, 32)
+# Shape map: (1536, 32) -> (16, 3, 32, 32)
+new_conv_1_w = old_dense_1_w.reshape(16, 3, 32, 32)
 new_weight_layers[6].set_weights([new_conv_1_w, old_dense_1_b])
 
 # 7 is Dense(16) -> Conv2D(16) kernel and bias

@@ -199,26 +199,26 @@ def build_model(input_shape):
     Regularization: Heavy L2 (0.002) + strong Dropout (0.5)
     """
     
-    l2_reg = regularizers.l2(0.002)
+    l2_reg = regularizers.l2(0.001)
     
     model = models.Sequential([
         # Input with explicit 4D shape
         layers.Input(shape=input_shape),
 
-        # Conv Block 1 - 8 filters
-        layers.Conv2D(8, (3, 3), padding='same', kernel_regularizer=l2_reg),
-        layers.BatchNormalization(),
-        layers.Activation('relu'),
-        layers.MaxPooling2D((2, 2)),
-
-        # Conv Block 2 - 16 filters
+        # Conv Block 1 - 16 filters
         layers.Conv2D(16, (3, 3), padding='same', kernel_regularizer=l2_reg),
         layers.BatchNormalization(),
         layers.Activation('relu'),
         layers.MaxPooling2D((2, 2)),
 
-        # Conv Block 3 - 16 filters
-        layers.Conv2D(16, (3, 3), padding='same', kernel_regularizer=l2_reg),
+        # Conv Block 2 - 32 filters
+        layers.Conv2D(32, (3, 3), padding='same', kernel_regularizer=l2_reg),
+        layers.BatchNormalization(),
+        layers.Activation('relu'),
+        layers.MaxPooling2D((2, 2)),
+
+        # Conv Block 3 - 32 filters
+        layers.Conv2D(32, (3, 3), padding='same', kernel_regularizer=l2_reg),
         layers.BatchNormalization(),
         layers.Activation('relu'),
         layers.MaxPooling2D((2, 2)),
@@ -226,12 +226,12 @@ def build_model(input_shape):
         # Flatten - Static reshape (NO MEAN, NO GlobalAvgPool!)
         layers.Flatten(), 
         
-        # Dense layers with strong dropout
+        # Dense layers with moderate dropout
         layers.Dense(32, activation='relu', kernel_regularizer=l2_reg),
-        layers.Dropout(0.5),
+        layers.Dropout(0.3),
 
         layers.Dense(16, activation='relu', kernel_regularizer=l2_reg),
-        layers.Dropout(0.5),
+        layers.Dropout(0.3),
 
         # Output
         layers.Dense(1, activation='sigmoid')
@@ -273,13 +273,15 @@ def train_model(X_train, X_val, y_train, y_val):
     log_message("\nModel Architecture:")
     model.summary()
 
-    # No class weights needed - data is already balanced (~50/50)
+    # Class weights removed for now — letting the model learn naturally
+    class_weights = {0: 1.0, 1: 1.0}
     log_message(f"\nTraining Configuration:")
     log_message(f"  Epochs:        {EPOCHS}")
     log_message(f"  Batch size:    {BATCH_SIZE}")
     log_message(f"  Learning rate: {LEARNING_RATE}")
     log_message(f"  Early stop patience: {PATIENCE_EARLY_STOP}")
     log_message(f"  LR reduce patience:  {PATIENCE_LR_REDUCE}")
+    log_message(f"  Class Weights:       {class_weights}")
 
     # Callbacks
     callbacks = [
@@ -305,6 +307,7 @@ def train_model(X_train, X_val, y_train, y_val):
         validation_data=(X_val, y_val),
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
+        class_weight=class_weights,
         callbacks=callbacks,
         verbose=1
     )
@@ -456,16 +459,42 @@ def main():
             log_message("  ⚠ WARNING: Features have near-zero variance — model cannot learn!")
     # ==================== END DIAGNOSTIC ====================================
 
-    # ==================== NO NORMALIZATION ==================================
-    # ESP32 does NOT normalize MFCCs before inference.
-    # Training on raw values ensures the model sees the same distribution
-    # as the ESP32 will feed it at runtime.
+    # ==================== FEATURE NORMALIZATION =============================
     log_message("\n" + "=" * 70)
-    log_message("NORMALIZATION: SKIPPED (ESP32-matched pipeline)")
+    log_message("NORMALIZING FEATURES (AND GENERATING ESP32 HEADER)")
     log_message("=" * 70)
-    log_message(f"  X_train raw stats: mean={X_train.mean():.4f}, std={X_train.std():.4f}")
-    log_message(f"  X_train range: [{X_train.min():.2f}, {X_train.max():.2f}]")
-    # ==================== END NO NORMALIZATION ==============================
+
+    # Calculate global mean and std for each of the 39 DCT features
+    # Axis 0 (samples) and Axis 1 (frames), keeping Axis 2 (39 features)
+    train_mean = X_train.mean(axis=(0, 1))
+    train_std = X_train.std(axis=(0, 1)) + 1e-8
+
+    X_train = (X_train - train_mean) / train_std
+    X_val = (X_val - train_mean) / train_std
+    X_test = (X_test - train_mean) / train_std
+    
+    # Generate C++ Header for the hardware team
+    header_path = MODELS_DIR / "mfcc_norm_stats.h"
+    with open(header_path, "w") as f:
+        f.write("// Auto-generated normalization stats for ESP32\n")
+        f.write("#ifndef MFCC_NORM_STATS_H\n")
+        f.write("#define MFCC_NORM_STATS_H\n\n")
+        f.write("const float MFCC_MEAN[39] = {\n")
+        f.write("    " + ", ".join([f"{m:.6f}f" for m in train_mean]) + "\n")
+        f.write("};\n\n")
+        f.write("const float MFCC_STD[39] = {\n")
+        f.write("    " + ", ".join([f"{s:.6f}f" for s in train_std]) + "\n")
+        f.write("};\n\n")
+        f.write("#endif // MFCC_NORM_STATS_H\n")
+
+    # Also save as npz so we can load it in evaluate_thresholds.py
+    norm_path = MODELS_DIR / "normalization_stats-v2.npz"
+    np.savez(norm_path, mean=train_mean, std=train_std)
+
+    log_message(f"  X_train after norm: mean={X_train.mean():.4f}, std={X_train.std():.4f}")
+    log_message(f"  ✓ ESP32 C++ Header generated at {header_path}")
+    log_message(f"  ✓ Python npz stats generated at {norm_path}")
+    # ==================== END NORMALIZATION =================================
 
     # Balance training set
     log_message("\n" + "=" * 70)
