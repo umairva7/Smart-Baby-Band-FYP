@@ -6,10 +6,9 @@ class HeartbeatPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Heart Rate with Live Animation
@@ -30,8 +29,7 @@ class HeartbeatPage extends StatelessWidget {
 
             // Detailed Statistics
             _buildDetailedStats(),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -61,7 +59,7 @@ class HeartbeatPage extends StatelessWidget {
                   height: 150,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.red.withOpacity(0.1),
+                    color: Colors.red.withValues(alpha: 0.1),
                   ),
                   child: Center(
                     child: Container(
@@ -69,7 +67,7 @@ class HeartbeatPage extends StatelessWidget {
                       height: 120,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.red.withOpacity(0.2),
+                        color: Colors.red.withValues(alpha: 0.2),
                       ),
                       child: Center(
                         child: Container(
@@ -77,7 +75,7 @@ class HeartbeatPage extends StatelessWidget {
                           height: 90,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.red.withOpacity(0.3),
+                            color: Colors.red.withValues(alpha: 0.3),
                           ),
                           child: Center(
                             child: Column(
@@ -626,7 +624,7 @@ class HeartbeatPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(

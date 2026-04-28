@@ -6,10 +6,9 @@ class TemperaturePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Temperature Gauge
@@ -26,8 +25,7 @@ class TemperaturePage extends StatelessWidget {
 
             // Temperature Statistics
             _buildTemperatureStats(),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -214,7 +212,7 @@ class TemperaturePage extends StatelessWidget {
                     getDrawingHorizontalLine: (value) {
                       if (value == 37.0) {
                         return FlLine(
-                          color: Colors.red.withOpacity(0.5),
+                          color: Colors.red.withValues(alpha: 0.5),
                           strokeWidth: 1,
                           dashArray: const [5, 5],
                         );
@@ -278,8 +276,8 @@ class TemperaturePage extends StatelessWidget {
                         show: true,
                         gradient: LinearGradient(
                           colors: [
-                            Colors.orange.withOpacity(0.5),
-                            Colors.orange.withOpacity(0.1),
+                            Colors.orange.withValues(alpha: 0.5),
+                            Colors.orange.withValues(alpha: 0.1),
                           ],
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
@@ -323,7 +321,7 @@ class TemperaturePage extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
+                    color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -544,16 +542,16 @@ class TemperaturePage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.05),
+        color: color.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 20),

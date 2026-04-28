@@ -11,11 +11,15 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
   bool isLoading = false;
+  bool _obscurePassword = true;
 
   // TEMP login method (no Firebase)
   Future<void> loginUser() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() => isLoading = true);
 
     await Future.delayed(const Duration(seconds: 1)); // fake loading
@@ -30,84 +34,159 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        centerTitle: true,
-        title: const Text(
+        title: Text(
           'LOG IN',
-          style: TextStyle(
-            fontSize: 28.0,
-            fontWeight: FontWeight.bold,
-            color: Colors.black,
-          ),
+          style: theme.textTheme.headlineMedium,
         ),
       ),
       body: SafeArea(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircleAvatar(
-              radius: 60,
-              backgroundImage: NetworkImage(
-                'https://d1iiooxwdowqwr.cloudfront.net/pub/appsubmissions/20170824171043_Iconfinal.jpg',
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30),
-              child: TextFormField(
-                controller: emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: const Icon(Icons.email, color: Colors.blueGrey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30),
-              child: TextFormField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: const Icon(Icons.lock, color: Colors.blueGrey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 30),
-
-            isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color.fromARGB(255, 80, 192, 209),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 40,
-                        vertical: 12,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // App Logo
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [
+                          colorScheme.primary.withValues(alpha: 0.15),
+                          colorScheme.tertiary.withValues(alpha: 0.10),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
                     ),
-                    onPressed: loginUser,
-                    child: const Text(
-                      'LOG IN',
-                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    child: Icon(
+                      Icons.child_care_rounded,
+                      size: 56,
+                      color: colorScheme.primary,
                     ),
                   ),
-          ],
+
+                  const SizedBox(height: 12),
+                  Text(
+                    'Smart Baby Band',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Monitor your little one with care',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+
+                  const SizedBox(height: 36),
+
+                  // Email field
+                  TextFormField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Email is required';
+                      }
+                      if (!value.contains('@')) {
+                        return 'Enter a valid email';
+                      }
+                      return null;
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email_outlined),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Password field
+                  TextFormField(
+                    controller: passwordController,
+                    obscureText: _obscurePassword,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Password is required';
+                      }
+                      if (value.length < 6) {
+                        return 'Password must be at least 6 characters';
+                      }
+                      return null;
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: const Icon(Icons.lock_outlined),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Forgot password
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        // TODO: Navigate to forgot password
+                      },
+                      child: const Text('Forgot Password?'),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Login button
+                  SizedBox(
+                    width: double.infinity,
+                    child: isLoading
+                        ? Center(
+                            child: CircularProgressIndicator(
+                              color: colorScheme.primary,
+                            ),
+                          )
+                        : ElevatedButton(
+                            onPressed: loginUser,
+                            child: const Text('LOG IN'),
+                          ),
+                  ),
+
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

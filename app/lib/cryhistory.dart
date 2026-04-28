@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'core/theme/app_colors.dart';
 
 class CryPage extends StatelessWidget {
   const CryPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Summary Cards
@@ -25,11 +25,10 @@ class CryPage extends StatelessWidget {
             const SizedBox(height: 20),
 
             // Recent Cries List
-            _buildRecentCries(),
+            _buildRecentCries(context),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildSummaryCards() {
@@ -40,7 +39,7 @@ class CryPage extends StatelessWidget {
             'Today\'s Cries',
             '8',
             Icons.mic,
-            Colors.purple,
+            AppColors.chartPurple,
           ),
         ),
         const SizedBox(width: 10),
@@ -49,7 +48,7 @@ class CryPage extends StatelessWidget {
             'Avg Duration',
             '4.2 min',
             Icons.timer,
-            Colors.blue,
+            AppColors.chartBlue,
           ),
         ),
         const SizedBox(width: 10),
@@ -58,7 +57,7 @@ class CryPage extends StatelessWidget {
             'Most Reason',
             'Hunger',
             Icons.local_dining,
-            Colors.orange,
+            AppColors.chartOrange,
           ),
         ),
       ],
@@ -70,9 +69,9 @@ class CryPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         children: [
@@ -200,15 +199,15 @@ class CryPage extends StatelessWidget {
                     LineChartBarData(
                       spots: cryData,
                       isCurved: true,
-                      color: Colors.purple,
+                      color: AppColors.chartPurple,
                       barWidth: 3,
                       isStrokeCapRound: true,
                       belowBarData: BarAreaData(
                         show: true,
                         gradient: LinearGradient(
                           colors: [
-                            Colors.purple.withOpacity(0.3),
-                            Colors.purple.withOpacity(0.1),
+                            AppColors.chartPurple.withValues(alpha: 0.3),
+                            AppColors.chartPurple.withValues(alpha: 0.1),
                           ],
                         ),
                       ),
@@ -340,7 +339,7 @@ class CryPage extends StatelessWidget {
     );
   }
 
-  Widget _buildRecentCries() {
+  Widget _buildRecentCries(BuildContext context) {
     final List<Map<String, dynamic>> recentCries = [
       {
         'time': '2:30 PM',
@@ -400,7 +399,7 @@ class CryPage extends StatelessWidget {
                         height: 40,
                         decoration: BoxDecoration(
                           color: _getReasonColor(cry['reason'] as String)
-                              .withOpacity(0.1),
+                              .withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Icon(

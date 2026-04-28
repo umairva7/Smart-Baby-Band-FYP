@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'core/theme/app_theme.dart';
+import 'theme_provider.dart';
 import 'login.dart';
 import 'dash.dart';
 import 'history.dart';
 import 'notification.dart';
 import 'settings.dart';
+
+/// Global [ThemeProvider] instance shared across the app.
+/// Screens can access it via [MyApp.themeProvider].
+final ThemeProvider _themeProvider = ThemeProvider();
 
 void main() {
   runApp(const MyApp());
@@ -12,56 +18,31 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
+  /// Public accessor so any screen can toggle the theme
+  /// via `MyApp.themeProvider.toggleTheme(...)`.
+  static ThemeProvider get themeProvider => _themeProvider;
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Smart Baby Band',
-      theme: _lightTheme,
-      initialRoute: '/login',
-      routes: {
-        '/login': (context) => const LoginPage(),
-        '/dashboard': (context) => const DashboardPage(),
-        '/history': (context) => const HistoryPage(),
-        '/notifications': (context) => const NotificationsPage(),
-        '/settings': (context) => const SettingsPage(),
+    return ListenableBuilder(
+      listenable: _themeProvider,
+      builder: (context, _) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Smart Baby Band',
+          themeMode: _themeProvider.themeMode,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          initialRoute: '/login',
+          routes: {
+            '/login': (context) => const LoginPage(),
+            '/dashboard': (context) => const DashboardPage(),
+            '/history': (context) => const HistoryPage(),
+            '/notifications': (context) => const NotificationsPage(),
+            '/settings': (context) => const SettingsPage(),
+          },
+        );
       },
     );
   }
-
-  static final ThemeData _lightTheme = ThemeData(
-    brightness: Brightness.light,
-    primaryColor: const Color(0xFF3BB9FF),
-    scaffoldBackgroundColor: const Color(0xFFF5FBFF),
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFF3BB9FF),
-      brightness: Brightness.light,
-    ),
-    textTheme: const TextTheme(
-      bodyMedium: TextStyle(color: Colors.black87),
-      titleLarge: TextStyle(
-        fontWeight: FontWeight.bold,
-        color: Colors.black,
-      ),
-    ),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      centerTitle: true,
-      titleTextStyle: TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.bold,
-        color: Colors.black,
-      ),
-      iconTheme: IconThemeData(color: Colors.black),
-    ),
-    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      selectedItemColor: Color(0xFF3BB9FF),
-      unselectedItemColor: Colors.grey,
-      backgroundColor: Colors.white,
-      type: BottomNavigationBarType.fixed,
-    ),
-    cardColor: Colors.white,
-    dividerColor: Colors.grey[300],
-  );
 }

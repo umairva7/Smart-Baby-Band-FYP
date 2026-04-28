@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'core/theme/app_colors.dart';
 import 'navigation.dart';
 
 class NotificationsPage extends StatelessWidget {
@@ -6,76 +7,74 @@ class NotificationsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5FBFF),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
+    return Scaffold(
       // ✅ Main body
       body: SafeArea(
         child: Center(
           child: Container(
-            width: 250,
-            padding: const EdgeInsets.all(20),
+            width: 280,
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
+              color: colorScheme.surface,
+              borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: colorScheme.shadow,
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
+                Text(
                   'Emergency Alert',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 18),
                 Container(
-                  height: 70,
-                  width: 70,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFFE4E4),
+                  height: 72,
+                  width: 72,
+                  decoration: BoxDecoration(
+                    color: AppColors.heartRateBg,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
                     Icons.favorite_rounded,
-                    color: Color(0xFFFF6B6B),
+                    color: AppColors.heartRate,
                     size: 40,
                   ),
                 ),
                 const SizedBox(height: 15),
-                const Text(
+                Text(
                   'Heart rate',
-                  style: TextStyle(fontSize: 16, color: Colors.black54),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                const Text(
+                Text(
                   '150 bpm',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const Text(
+                Text(
                   'Too High',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.redAccent,
-                    fontWeight: FontWeight.w500,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
+                  child: ElevatedButton.icon(
                     onPressed: () {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -84,21 +83,12 @@ class NotificationsPage extends StatelessWidget {
                         ),
                       );
                     },
+                    icon: const Icon(Icons.phone_rounded, size: 20),
+                    label: const Text('Call Doctor'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF9EE8FF),
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'Call Doctor',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      backgroundColor: AppColors.error,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
                 ),

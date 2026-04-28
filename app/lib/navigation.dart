@@ -25,25 +25,33 @@ class AppBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final navTheme = theme.bottomNavigationBarTheme;
+
     return BottomNavigationBar(
       currentIndex: currentIndex,
       onTap: (index) => _onItemTapped(context, index),
       type: BottomNavigationBarType.fixed,
-      selectedItemColor: const Color(0xFF3BB9FF),
-      unselectedItemColor: Colors.grey,
-      backgroundColor:
-          Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+      selectedItemColor: navTheme.selectedItemColor,
+      unselectedItemColor: navTheme.unselectedItemColor,
+      backgroundColor: navTheme.backgroundColor,
       items: const [
         BottomNavigationBarItem(
-          icon: Icon(Icons.dashboard),
+          icon: Icon(Icons.dashboard_rounded),
           label: 'Dashboard',
         ),
-        BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
         BottomNavigationBarItem(
-          icon: Icon(Icons.notifications),
+          icon: Icon(Icons.history_rounded),
+          label: 'History',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.notifications_rounded),
           label: 'Notifications',
         ),
-        BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.settings_rounded),
+          label: 'Settings',
+        ),
       ],
     );
   }

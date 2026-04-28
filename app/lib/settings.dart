@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'core/theme/app_colors.dart';
+import 'main.dart';
 import 'navigation.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -10,7 +12,6 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _notifications = true;
-  bool _soundAlerts = true;
   bool _vibration = true;
   bool _autoSync = true;
   bool _babyDataSharing = false;
@@ -21,26 +22,47 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = MyApp.themeProvider.isDarkMode;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5FBFF),
       appBar: AppBar(
-        title: const Text('Settings'),
-        backgroundColor: Colors.white,
-        centerTitle: true,
-        elevation: 0,
+        title: Text('Settings', style: theme.textTheme.headlineMedium),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           // Profile Section
-          _buildProfileSection(),
+          _buildProfileSection(theme, colorScheme),
           const SizedBox(height: 30),
 
-          // General Settings
-          _buildSectionTitle('General Settings'),
-          _buildSettingCard([
+          // Appearance
+          _buildSectionTitle('Appearance', colorScheme),
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.notifications,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.dark_mode_rounded,
+              title: 'Dark Mode',
+              trailing: Switch(
+                value: isDark,
+                onChanged: (value) {
+                  MyApp.themeProvider.toggleTheme(value);
+                  setState(() {});
+                },
+              ),
+            ),
+          ]),
+          const SizedBox(height: 20),
+
+          // General Settings
+          _buildSectionTitle('General Settings', colorScheme),
+          _buildSettingCard(theme, [
+            _buildSettingTile(
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.notifications_rounded,
               title: 'Push Notifications',
               trailing: Switch(
                 value: _notifications,
@@ -49,12 +71,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     _notifications = value;
                   });
                 },
-                activeColor: const Color(0xFF3BB9FF),
               ),
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.volume_up,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.volume_up_rounded,
               title: 'Alert Volume',
               subtitle: '${(_alertVolume * 100).toInt()}%',
               trailing: SizedBox(
@@ -69,13 +92,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   min: 0.0,
                   max: 1.0,
                   divisions: 10,
-                  activeColor: const Color(0xFF3BB9FF),
                 ),
               ),
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.vibration,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.vibration_rounded,
               title: 'Vibration Alerts',
               trailing: Switch(
                 value: _vibration,
@@ -84,17 +108,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     _vibration = value;
                   });
                 },
-                activeColor: const Color(0xFF3BB9FF),
               ),
             ),
           ]),
           const SizedBox(height: 20),
 
           // Baby Monitor Settings
-          _buildSectionTitle('Baby Monitor Settings'),
-          _buildSettingCard([
+          _buildSectionTitle('Baby Monitor Settings', colorScheme),
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.sync,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.sync_rounded,
               title: 'Auto Sync Data',
               subtitle: 'Sync every 5 minutes',
               trailing: Switch(
@@ -104,12 +129,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     _autoSync = value;
                   });
                 },
-                activeColor: const Color(0xFF3BB9FF),
               ),
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.share,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.share_rounded,
               title: 'Share Baby Data',
               subtitle: 'With pediatrician',
               trailing: Switch(
@@ -119,12 +145,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     _babyDataSharing = value;
                   });
                 },
-                activeColor: const Color(0xFF3BB9FF),
               ),
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.thermostat,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.thermostat_rounded,
               title: 'Temperature Unit',
               subtitle: _temperatureUnit,
               trailing: DropdownButton<String>(
@@ -148,33 +175,51 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
 
           // Alert Settings
-          _buildSectionTitle('Alert Settings'),
-          _buildSettingCard([
+          _buildSectionTitle('Alert Settings', colorScheme),
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.warning,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.warning_rounded,
               title: 'Critical Alerts',
               subtitle: 'Heart rate > 150 BPM',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 _showAlertSettings('Critical Alerts');
               },
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.thermostat,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.thermostat_rounded,
               title: 'Temperature Alerts',
               subtitle: 'Above 37.5°C',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 _showAlertSettings('Temperature Alerts');
               },
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.mic,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.mic_rounded,
               title: 'Cry Detection Sensitivity',
               subtitle: 'Medium',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 _showAlertSettings('Cry Detection');
               },
@@ -183,10 +228,12 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
 
           // App Settings
-          _buildSectionTitle('App Settings'),
-          _buildSettingCard([
+          _buildSectionTitle('App Settings', colorScheme),
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.language,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.language_rounded,
               title: 'Language',
               subtitle: _selectedLanguage,
               trailing: DropdownButton<String>(
@@ -206,9 +253,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 underline: Container(),
               ),
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.straighten,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.straighten_rounded,
               title: 'Distance Unit',
               subtitle: _distanceUnit,
               trailing: DropdownButton<String>(
@@ -232,30 +281,48 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
 
           // Support Section
-          _buildSectionTitle('Support'),
-          _buildSettingCard([
+          _buildSectionTitle('Support', colorScheme),
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.help_outline,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.help_outline_rounded,
               title: 'Help & Support',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 // Navigate to help page
               },
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.privacy_tip,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.privacy_tip_rounded,
               title: 'Privacy Policy',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 // Show privacy policy
               },
             ),
-            _buildDivider(),
+            _buildDivider(theme),
             _buildSettingTile(
-              icon: Icons.description,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.description_rounded,
               title: 'Terms of Service',
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
+              ),
               onTap: () {
                 // Show terms of service
               },
@@ -264,18 +331,20 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
 
           // About App
-          _buildSettingCard([
+          _buildSettingCard(theme, [
             _buildSettingTile(
-              icon: Icons.info_outline,
+              theme: theme,
+              colorScheme: colorScheme,
+              icon: Icons.info_outline_rounded,
               title: 'About App',
               onTap: () {
                 showAboutDialog(
                   context: context,
                   applicationName: 'Smart Baby Monitor',
                   applicationVersion: '1.2.0',
-                  applicationIcon: const Icon(
-                    Icons.child_care,
-                    color: Color(0xFF3BB9FF),
+                  applicationIcon: Icon(
+                    Icons.child_care_rounded,
+                    color: colorScheme.primary,
                     size: 48,
                   ),
                   children: [
@@ -313,8 +382,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _showLogoutConfirmation();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.withOpacity(0.1),
-                foregroundColor: Colors.red,
+                backgroundColor: AppColors.error.withValues(alpha: 0.1),
+                foregroundColor: AppColors.error,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -337,111 +406,111 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildProfileSection() {
+  Widget _buildProfileSection(ThemeData theme, ColorScheme colorScheme) {
     return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 70,
-              height: 70,
-              decoration: BoxDecoration(
-                color: const Color(0xFF3BB9FF).withOpacity(0.1),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFF3BB9FF).withOpacity(0.3),
-                  width: 2,
-                ),
-              ),
-              child: const Icon(
-                Icons.person,
-                size: 35,
-                color: Color(0xFF3BB9FF),
-              ),
-            ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'John & Sarah',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    'Parents of Emma',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF3BB9FF).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'Premium Plan',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF3BB9FF),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.edit_outlined, color: Color(0xFF3BB9FF)),
-              onPressed: () {
-                // Navigate to edit profile
-              },
-            ),
-          ],
-        ));
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-        padding: const EdgeInsets.only(bottom: 12.0),
-        child: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF3BB9FF),
-          ),
-        ));
-  }
-
-  Widget _buildSettingCard(List<Widget> children) {
-    return Container(
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: colorScheme.shadow,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: colorScheme.primary.withValues(alpha: 0.3),
+                width: 2,
+              ),
+            ),
+            child: Icon(
+              Icons.person_rounded,
+              size: 35,
+              color: colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'John & Sarah',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Parents of Emma',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Premium Plan',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.edit_outlined, color: colorScheme.primary),
+            onPressed: () {
+              // Navigate to edit profile
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title, ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: colorScheme.primary,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingCard(ThemeData theme, List<Widget> children) {
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -454,6 +523,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildSettingTile({
+    required ThemeData theme,
+    required ColorScheme colorScheme,
     required IconData icon,
     required String title,
     String? subtitle,
@@ -465,45 +536,46 @@ class _SettingsPageState extends State<SettingsPage> {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: const Color(0xFF3BB9FF).withOpacity(0.1),
+          color: colorScheme.primary.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
           icon,
-          color: const Color(0xFF3BB9FF),
+          color: colorScheme.primary,
           size: 22,
         ),
       ),
       title: Text(
         title,
-        style: const TextStyle(
-          fontSize: 16,
+        style: theme.textTheme.bodyLarge?.copyWith(
           fontWeight: FontWeight.w500,
-          color: Colors.black,
         ),
       ),
       subtitle: subtitle != null
           ? Text(
               subtitle,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[600],
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             )
           : null,
       trailing: trailing ??
-          const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+          Icon(
+            Icons.arrow_forward_ios,
+            size: 16,
+            color: colorScheme.onSurfaceVariant,
+          ),
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     );
   }
 
-  Widget _buildDivider() {
+  Widget _buildDivider(ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.only(left: 72.0, right: 16.0),
       child: Divider(
         height: 1,
-        color: Colors.grey[300],
+        color: theme.dividerColor,
       ),
     );
   }
@@ -528,6 +600,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showLogoutConfirmation() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -543,7 +617,10 @@ class _SettingsPageState extends State<SettingsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
             ),
             ElevatedButton(
               onPressed: () {
@@ -557,7 +634,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 );
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: AppColors.error,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Log Out'),

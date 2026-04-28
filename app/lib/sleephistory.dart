@@ -6,10 +6,9 @@ class SleepPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Sleep Summary
@@ -26,8 +25,7 @@ class SleepPage extends StatelessWidget {
 
             // Sleep Statistics
             _buildSleepStats(),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -76,7 +74,7 @@ class SleepPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.indigo.withOpacity(0.1),
+                color: Colors.indigo.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Icon(
@@ -192,8 +190,8 @@ class SleepPage extends StatelessWidget {
                         show: true,
                         gradient: LinearGradient(
                           colors: [
-                            Colors.indigo.withOpacity(0.3),
-                            Colors.indigo.withOpacity(0.1),
+                            Colors.indigo.withValues(alpha: 0.3),
+                            Colors.indigo.withValues(alpha: 0.1),
                           ],
                         ),
                       ),
@@ -352,7 +350,7 @@ class SleepPage extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: color, size: 24),
