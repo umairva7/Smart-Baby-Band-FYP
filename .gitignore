@@ -8,6 +8,9 @@ ml_model/models/*.tflite
 node_modules/
 .env
 
+/ml_model/data/
+/ml_model/models/
+
 # IDEs
 .idea/
 .vscode/
