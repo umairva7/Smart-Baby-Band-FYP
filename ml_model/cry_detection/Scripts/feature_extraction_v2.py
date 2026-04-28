@@ -33,6 +33,7 @@ from pathlib import Path
 import librosa
 import pickle
 from datetime import datetime
+from scipy.fft import dct as scipy_dct
 
 # ============================================================================
 # CONFIGURATION — MATCHED TO ESP32 HARDWARE
@@ -49,9 +50,9 @@ PROCESSED_DIR = Path("../data/processed_v2")
 
 # --- Audio Parameters (MUST match ESP32 exactly) ---
 SAMPLING_RATE = 16000
-N_MFCC = 39          # ESP32 computes 39 DCT coefficients (not 13+deltas)
-N_MELS = 26          # ESP32 uses 26 mel filter banks (not librosa default 128)  
-N_FFT = 512          # ESP32 uses 512-point FFT (not 400)
+N_MFCC = 26          # Bounded by N_MELS (can't have more DCT coeffs than mel bands)
+N_MELS = 26          # ESP32 uses 26 mel filter banks
+N_FFT = 512          # ESP32 uses 512-point FFT
 FRAME_LENGTH = 400   # 25ms window
 HOP_LENGTH = 160     # 10ms hop
 FRAMES_PER_SAMPLE = 128
@@ -75,17 +76,25 @@ def log(msg):
 
 
 def extract_mfcc_esp32_matched(audio_path, target_frames=FRAMES_PER_SAMPLE):
-    """Extract MFCC features IDENTICAL to ESP32 computation.
+    """Extract MFCC features using IDENTICAL math to the ESP32 C++ code.
+
+    This function does NOT use librosa.feature.mfcc() because librosa
+    internally uses power spectrum + 10*log10 + ortho-normalized DCT,
+    while the ESP32 uses magnitude + natural log + raw DCT.
     
-    Key differences from v1:
-      - 39 raw DCT coefficients (NO deltas/delta-deltas)
-      - 26 mel filters (not 128)
-      - 512-point FFT (not 400)
-      - Pre-emphasis 0.97
-      - Hamming window (not Hann)
-      - No normalization
+    Those differences cause the normalization stats (mean/std) to be
+    on a completely different numerical scale, which is why the hardware
+    model was outputting near-zero for everything.
+
+    ESP32 C++ pipeline (matched exactly here):
+      1. Pre-emphasis: y[i] -= 0.97 * y[i-1]
+      2. Hamming window per frame
+      3. 512-point FFT → MAGNITUDE (not power/magnitude²)
+      4. Mel filterbank (26 filters) applied to magnitude
+      5. Natural log: ln(mel_energy + 1e-6)
+      6. Raw DCT-II (NO orthonormal scaling)
     
-    Returns shape: (FRAMES_PER_SAMPLE, 39) = (128, 39)
+    Returns shape: (FRAMES_PER_SAMPLE, 26) = (128, 26)
     """
     try:
         # Load and resample to 16kHz
@@ -98,29 +107,39 @@ def extract_mfcc_esp32_matched(audio_path, target_frames=FRAMES_PER_SAMPLE):
         # --- PRE-EMPHASIS (matches ESP32: y[i] -= 0.97 * y[i-1]) ---
         y = np.append(y[0], y[1:] - PREEMPHASIS * y[:-1])
 
-        # --- MFCC extraction matched to ESP32 ---
-        # n_mfcc=39:  extract 39 DCT coefficients directly (ESP32 does this)
-        # n_mels=26:  use 26 mel filter banks (ESP32's MEL_FILTERS=26)
-        # n_fft=512:  512-point FFT (ESP32's FFT_SIZE=512)
-        # window='hamming': match ESP32's Hamming window
-        # center=False: ESP32 doesn't center frames
-        # win_length=400: actual window is 400 samples, zero-padded to 512
-        mfcc = librosa.feature.mfcc(
-            y=y,
-            sr=SAMPLING_RATE,
-            n_mfcc=N_MFCC,         # 39 DCT coefficients
-            n_mels=N_MELS,         # 26 mel filter banks
-            n_fft=N_FFT,           # 512-point FFT
-            hop_length=HOP_LENGTH, # 160 samples
-            win_length=FRAME_LENGTH, # 400 sample window
-            window='hamming',      # Hamming (not Hann)
-            center=False,          # No centering (matches ESP32)
-        )
-        
-        # mfcc shape: (39, frames) → transpose → (frames, 39)
-        features = mfcc.T
+        # --- Step 1: STFT → MAGNITUDE (not power!) ---
+        # ESP32 uses ArduinoFFT.complexToMagnitude() which gives |FFT|
+        S = np.abs(librosa.stft(
+            y,
+            n_fft=N_FFT,
+            hop_length=HOP_LENGTH,
+            win_length=FRAME_LENGTH,
+            window='hamming',
+            center=False,
+        ))
+        # S shape: (FFT_SIZE/2 + 1, frames) = (257, frames)
 
-        # NO DELTAS — ESP32 does not compute deltas
+        # --- Step 2: Mel filterbank applied to MAGNITUDE ---
+        mel_basis = librosa.filters.mel(
+            sr=SAMPLING_RATE,
+            n_fft=N_FFT,
+            n_mels=N_MELS,
+        )
+        # mel_basis shape: (26, 257)
+        mel_spec = mel_basis @ S  # (26, frames)
+
+        # --- Step 3: Natural log (matches ESP32's logf()) ---
+        log_mel = np.log(mel_spec + 1e-6)  # (26, frames)
+
+        # --- Step 4: Raw DCT-II (NO ortho normalization) ---
+        # ESP32 code: val += melE[m] * cosf((PI * c * (m + 0.5f)) / MEL_FILTERS)
+        # scipy's DCT-II (norm=None) includes a factor of 2, but this constant
+        # factor is fully absorbed by Z-score normalization (mean & std scale equally)
+        mfcc = scipy_dct(log_mel, type=2, n=N_MFCC, axis=0, norm=None)
+        # mfcc shape: (26, frames)
+
+        # Transpose to (frames, 26) 
+        features = mfcc.T
 
         # Pad or truncate to target frames
         if features.shape[0] < target_frames:

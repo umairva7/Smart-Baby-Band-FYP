@@ -464,8 +464,8 @@ def main():
     log_message("NORMALIZING FEATURES (AND GENERATING ESP32 HEADER)")
     log_message("=" * 70)
 
-    # Calculate global mean and std for each of the 39 DCT features
-    # Axis 0 (samples) and Axis 1 (frames), keeping Axis 2 (39 features)
+    # Calculate global mean and std for each of the 26 DCT features
+    # Axis 0 (samples) and Axis 1 (frames), keeping Axis 2 (26 features)
     train_mean = X_train.mean(axis=(0, 1))
     train_std = X_train.std(axis=(0, 1)) + 1e-8
 
@@ -479,10 +479,10 @@ def main():
         f.write("// Auto-generated normalization stats for ESP32\n")
         f.write("#ifndef MFCC_NORM_STATS_H\n")
         f.write("#define MFCC_NORM_STATS_H\n\n")
-        f.write("const float MFCC_MEAN[39] = {\n")
+        f.write(f"const float MFCC_MEAN[{len(train_mean)}] = {{\n")
         f.write("    " + ", ".join([f"{m:.6f}f" for m in train_mean]) + "\n")
         f.write("};\n\n")
-        f.write("const float MFCC_STD[39] = {\n")
+        f.write(f"const float MFCC_STD[{len(train_std)}] = {{\n")
         f.write("    " + ", ".join([f"{s:.6f}f" for s in train_std]) + "\n")
         f.write("};\n\n")
         f.write("#endif // MFCC_NORM_STATS_H\n")

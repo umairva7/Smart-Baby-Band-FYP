@@ -8,6 +8,7 @@ print("Loading test data...")
 X_test = np.load("../data/processed_v2/test/X_test.npy")
 y_test = np.load("../data/processed_v2/test/y_test.npy")
 
+
 print("Normalizing test data...")
 stats = np.load("../models/cry_detection/normalization_stats-v2.npz")
 X_test = (X_test - stats['mean']) / stats['std']
