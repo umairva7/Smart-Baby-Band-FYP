@@ -1,5 +1,7 @@
 data/
 models/
+features/
+logs/
 .venv/
 __pycache__/
 *.pyc
