@@ -19,6 +19,7 @@ Run as a script::
 
 from __future__ import annotations
 
+import argparse
 import csv
 from pathlib import Path
 
@@ -82,8 +83,41 @@ def _relpath(path: Path) -> str:
         return str(path.resolve())
 
 
-def expand_train(splits_csv: Path = SPLITS_CSV, *, num_variants: int = NUM_VARIANTS,
-                 seed: int = RANDOM_SEED) -> Path:
+def _group_by_label(rows: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
+    grouped = {label: [] for label in LABELS}
+    for row in rows:
+        grouped.setdefault(row["label"], []).append(row)
+    return grouped
+
+
+def _target_counts(
+    train_rows: list[dict[str, str]],
+    mode: str,
+    num_variants: int,
+    target_count: int | None,
+) -> dict[str, int]:
+    grouped = _group_by_label(train_rows)
+    orig_counts = {label: len(rows) for label, rows in grouped.items()}
+
+    if mode == "fixed":
+        return {label: count * (num_variants + 1) for label, count in orig_counts.items()}
+
+    if mode != "balanced":
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    default_target = max(orig_counts.values()) if orig_counts else 0
+    target = target_count if target_count is not None else default_target
+    return {label: max(target, count) for label, count in orig_counts.items()}
+
+
+def expand_train(
+    splits_csv: Path = SPLITS_CSV,
+    *,
+    num_variants: int = NUM_VARIANTS,
+    seed: int = RANDOM_SEED,
+    mode: str = "fixed",
+    target_count: int | None = None,
+) -> Path:
     """Generate augmented variants for every train row and rewrite splits.csv.
 
     Idempotent at the file level: if an augmented WAV already exists on disk
@@ -101,16 +135,27 @@ def expand_train(splits_csv: Path = SPLITS_CSV, *, num_variants: int = NUM_VARIA
     skipped = 0
     failed = 0
 
-    for row in train_rows:
-        src = _resolve(row["path"])
-        label = row["label"]
-        if not src.exists():
-            print(f"[expand_train] missing source {src}")
-            failed += 1
+    grouped = _group_by_label(train_rows)
+    targets = _target_counts(train_rows, mode, num_variants, target_count)
+
+    for label in LABELS:
+        rows_for_label = grouped.get(label, [])
+        if not rows_for_label:
             continue
 
-        for variant_idx in range(1, num_variants + 1):
-            dst = src.with_name(f"{src.stem}_aug{variant_idx}.wav")
+        desired_aug = max(0, targets[label] - len(rows_for_label))
+        if desired_aug == 0:
+            continue
+
+        for aug_idx in range(1, desired_aug + 1):
+            base_row = rows_for_label[(aug_idx - 1) % len(rows_for_label)]
+            src = _resolve(base_row["path"])
+            if not src.exists():
+                print(f"[expand_train] missing source {src}")
+                failed += 1
+                continue
+
+            dst = src.with_name(f"{src.stem}_aug{aug_idx}.wav")
             if dst.exists():
                 augmented.append(
                     {"path": _relpath(dst), "label": label, "split": "train"}
@@ -126,7 +171,7 @@ def expand_train(splits_csv: Path = SPLITS_CSV, *, num_variants: int = NUM_VARIA
                 )
                 written += 1
             except Exception as exc:  # pragma: no cover - defensive logging
-                print(f"[expand_train] FAILED {src} variant {variant_idx}: {exc}")
+                print(f"[expand_train] FAILED {src} aug {aug_idx}: {exc}")
                 failed += 1
 
     # Rebuild splits.csv: originals (all splits) + augmented (train only).
@@ -169,8 +214,38 @@ def _print_summary(
         print(f"  {label:<12} orig={n_orig:>4} aug={n_a:>4} total={n_orig + n_a:>4}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Augment train split audio.")
+    parser.add_argument(
+        "--mode",
+        choices=["fixed", "balanced"],
+        default="fixed",
+        help="fixed: each sample gets N variants (default); balanced: upsample each class to a target count.",
+    )
+    parser.add_argument(
+        "--num-variants",
+        type=int,
+        default=NUM_VARIANTS,
+        help="Used in fixed mode. Number of augmented copies per original.",
+    )
+    parser.add_argument(
+        "--target-count",
+        type=int,
+        default=None,
+        help="Used in balanced mode. If omitted, uses the largest original class count.",
+    )
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    return parser.parse_args()
+
+
 def main() -> None:
-    expand_train()
+    args = parse_args()
+    expand_train(
+        num_variants=args.num_variants,
+        seed=args.seed,
+        mode=args.mode,
+        target_count=args.target_count,
+    )
 
 
 if __name__ == "__main__":

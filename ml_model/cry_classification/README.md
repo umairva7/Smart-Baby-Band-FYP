@@ -51,7 +51,10 @@ and the workspace virtualenv (`.venv` at the repo root) is active.
 cd ml_model/cry_classification
 
 python dataset.py     # harmonize labels, resample/trim to data/processed, write splits.csv
-python augment.py     # 4x expand the train split (idempotent)
+python augment.py     # default fixed mode: 4x expand train split (idempotent)
+# optional for imbalance:
+# python augment.py --mode balanced              # upsample each class to max original class count
+# python augment.py --mode balanced --target-count 600
 python features.py    # build feature caches under features/
 
 python train.py --epochs 60 --batch-size 32     # train, save models/best.keras
@@ -97,3 +100,5 @@ inference paths can apply the same normalization.
 - `baby-crying/test/` clips are unlabeled (`test_*.wav`) and are not used;
   the test set comes from the stratified 80/10/10 split.
 - The pipeline is reproducible: every random seed defaults to 42.
+- `dataset.py` rewrites `data/processed/splits.csv` from originals only. If you
+  run it again, rerun `augment.py` afterward.
