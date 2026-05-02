@@ -166,6 +166,10 @@ def prepare_processed(rows: Iterable[tuple[Path, str]] | None = None) -> list[tu
             continue
         try:
             y = _load_normalize(src)
+            if np.abs(y).max() < 1e-4 or np.sqrt(np.mean(y**2)) < 1e-4:
+                print(f"[prepare_processed] SKIPPING {src.name} (too quiet/empty)")
+                skipped += 1
+                continue
             sf.write(str(dst), y, SR, subtype="PCM_16")
             out.append((dst, label))
             written += 1
@@ -185,12 +189,24 @@ def prepare_processed(rows: Iterable[tuple[Path, str]] | None = None) -> list[tu
 # ---------------------------------------------------------------------------
 
 
+def _corpus(path: str | Path) -> str:
+    p = str(path).lower()
+    if "donateacry" in p:
+        return "donateacry"
+    if "babycrying" in p or "baby-crying" in p:
+        return "babycrying"
+    return "unknown"
+
+
 def make_splits(
     rows: list[tuple[Path, str]] | None = None,
     *,
     val_size: float = 0.10,
     test_size: float = 0.10,
     seed: int = RANDOM_SEED,
+    strategy: str = "stratified",  # can be "cross_corpus"
+    test_corpus: str = "donateacry",
+    downsample_corpus: bool = True,
 ) -> Path:
     """Write a stratified 80/10/10 ``splits.csv`` next to processed audio.
 
@@ -208,25 +224,82 @@ def make_splits(
             "No processed clips found. Run prepare_processed() first."
         )
 
+    # Report corpus balance
+    print("[make_splits] Initial corpus distribution by class:")
+    from collections import defaultdict
+    counts = defaultdict(int)
+    for path, label in rows:
+        counts[(label, _corpus(path))] += 1
+    
+    corpora_names = sorted(list(set(_corpus(p) for p, _ in rows)))
+    header = f"  {'label':<12}" + "".join([f" {c:>12}" for c in corpora_names])
+    print(header)
+    for label in LABELS:
+        row_str = f"  {label:<12}"
+        for c in corpora_names:
+            row_str += f" {counts[(label, c)]:>12}"
+        print(row_str)
+
+    if downsample_corpus and strategy == "stratified":
+        balanced_rows = []
+        grouped = defaultdict(list)
+        for path, label in rows:
+            grouped[(label, _corpus(path))].append((path, label))
+        
+        for label in LABELS:
+            c_for_label = [c for (l, c) in grouped.keys() if l == label]
+            if not c_for_label:
+                continue
+            if len(c_for_label) > 1:
+                min_count = min(len(grouped[(label, c)]) for c in c_for_label)
+            else:
+                min_count = len(grouped[(label, c_for_label[0])])
+            
+            rng = np.random.default_rng(seed)
+            for c in c_for_label:
+                samples = grouped[(label, c)]
+                rng.shuffle(samples)
+                balanced_rows.extend(samples[:min_count])
+        rows = balanced_rows
+        print(f"[make_splits] Downsampled to {len(rows)} clips for corpus balance.")
+
     paths = np.array([str(p) for p, _ in rows])
     labels = np.array([lbl for _, lbl in rows])
 
-    # First split off the test set, then split the remainder into train/val.
-    p_train_val, p_test, y_train_val, y_test = train_test_split(
-        paths,
-        labels,
-        test_size=test_size,
-        random_state=seed,
-        stratify=labels,
-    )
-    val_relative = val_size / (1.0 - test_size)
-    p_train, p_val, y_train, y_val = train_test_split(
-        p_train_val,
-        y_train_val,
-        test_size=val_relative,
-        random_state=seed,
-        stratify=y_train_val,
-    )
+    if strategy == "cross_corpus":
+        corpora = np.array([_corpus(p) for p in paths])
+        test_mask = corpora == test_corpus
+        p_test = paths[test_mask]
+        y_test = labels[test_mask]
+        
+        p_rem = paths[~test_mask]
+        y_rem = labels[~test_mask]
+        
+        if len(p_rem) == 0:
+            raise ValueError(f"No samples left for train/val after holding out {test_corpus}")
+            
+        p_train, p_val, y_train, y_val = train_test_split(
+            p_rem, y_rem,
+            test_size=val_size / (1.0 - test_size),
+            random_state=seed,
+            stratify=y_rem
+        )
+    else:
+        p_train_val, p_test, y_train_val, y_test = train_test_split(
+            paths,
+            labels,
+            test_size=test_size,
+            random_state=seed,
+            stratify=labels,
+        )
+        val_relative = val_size / (1.0 - test_size)
+        p_train, p_val, y_train, y_val = train_test_split(
+            p_train_val,
+            y_train_val,
+            test_size=val_relative,
+            random_state=seed,
+            stratify=y_train_val,
+        )
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     with SPLITS_CSV.open("w", newline="") as fh:
