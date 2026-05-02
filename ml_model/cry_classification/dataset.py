@@ -1,186 +1,143 @@
-import argparse
-import random
-from pathlib import Path
-
+import os
+import glob
 import librosa
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import soundfile as sf
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+from pathlib import Path
 
-from config import (
-    AUGMENTED_DIR,
-    DATA_DIR,
-    LABELS,
-    LOGS_DIR,
-    NUM_SAMPLES,
-    PROCESSED_DIR,
-    RANDOM_SEED,
-    RAW_DIR,
-    SAMPLE_RATE,
-)
+# Constants
+SR = 16000
+DURATION = 3.0
+SAMPLES = int(SR * DURATION)
+TOP_DB = 20
 
-DROP_KEYWORDS = {"awake", "hug"}
-LABEL_KEYWORDS = {
-    "hungry": ["hungry", "hunger"],
-    "tired": ["tired", "sleepy", "sleep"],
-    "discomfort": ["discomfort", "discomf"],
-    "belly_pain": ["belly_pain", "bellypain", "belly", "colic", "stomach"],
-    "diaper": ["diaper", "nappy", "wet"],
-    "burping": ["burp", "burping"],
-}
+# 6 Harmonized classes
+TARGET_CLASSES = ["hungry", "tired", "discomfort", "belly_pain", "diaper", "burping"]
 
-
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-
-
-def iter_audio_files(root: Path) -> list[Path]:
-    exts = ["wav", "mp3", "flac", "ogg", "m4a"]
-    files: list[Path] = []
-    for ext in exts:
-        files.extend(root.rglob(f"*.{ext}"))
-    return files
-
-
-def detect_label(text: str) -> str | None:
-    lowered = text.lower()
-    if any(key in lowered for key in DROP_KEYWORDS):
-        return None
-    for label, keywords in LABEL_KEYWORDS.items():
-        if any(keyword in lowered for keyword in keywords):
-            return label
-    return None
-
-
-def process_audio(path: Path, top_db: int) -> np.ndarray | None:
-    audio, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True)
-    audio, _ = librosa.effects.trim(audio, top_db=top_db)
-    if audio.size == 0:
-        return None
-    audio = librosa.util.fix_length(audio, size=NUM_SAMPLES)
-    peak = np.max(np.abs(audio))
-    if peak > 0:
-        audio = audio / peak
-    return audio
-
-
-def collect_dac(dac_dir: Path) -> list[tuple[Path, str, str]]:
-    entries: list[tuple[Path, str, str]] = []
-    for path in iter_audio_files(dac_dir):
-        label = detect_label(path.stem)
-        if label:
-            entries.append((path, label, "dac"))
-    return entries
-
-
-def collect_baby_crying(baby_dir: Path) -> list[tuple[Path, str, str]]:
-    entries: list[tuple[Path, str, str]] = []
-    for path in iter_audio_files(baby_dir):
-        label = detect_label(path.parent.name)
-        if label:
-            entries.append((path, label, "baby_crying"))
-    return entries
-
-
-def build_splits(df: pd.DataFrame, seed: int) -> pd.DataFrame:
-    counts = df["label"].value_counts()
-    stratify = df["label"] if counts.min() >= 3 else None
-
-    train_df, temp_df = train_test_split(
-        df,
-        test_size=0.2,
-        stratify=stratify,
-        random_state=seed,
-    )
-
-    stratify_temp = temp_df["label"] if stratify is not None else None
-    val_df, test_df = train_test_split(
-        temp_df,
-        test_size=0.5,
-        stratify=stratify_temp,
-        random_state=seed,
-    )
-
-    train_df = train_df.copy()
-    val_df = val_df.copy()
-    test_df = test_df.copy()
-
-    train_df["split"] = "train"
-    val_df["split"] = "val"
-    test_df["split"] = "test"
-
-    return pd.concat([train_df, val_df, test_df], ignore_index=True)
-
-
-def plot_distribution(df: pd.DataFrame, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    counts = df["label"].value_counts().reindex(LABELS, fill_value=0)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    counts.plot(kind="bar", ax=ax, color="#4c72b0")
-    ax.set_title("Class distribution")
-    ax.set_xlabel("Label")
-    ax.set_ylabel("Count")
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare cry classification dataset.")
-    parser.add_argument("--dac-dir", type=Path, default=RAW_DIR / "donate_a_cry")
-    parser.add_argument("--baby-dir", type=Path, default=RAW_DIR / "baby_crying")
-    parser.add_argument("--processed-dir", type=Path, default=PROCESSED_DIR)
-    parser.add_argument("--splits-path", type=Path, default=DATA_DIR / "splits.csv")
-    parser.add_argument("--plot-path", type=Path, default=LOGS_DIR / "class_distribution.png")
-    parser.add_argument("--top-db", type=int, default=20)
-    args = parser.parse_args()
-
-    set_seed(RANDOM_SEED)
-
-    args.processed_dir.mkdir(parents=True, exist_ok=True)
-    AUGMENTED_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    entries: list[tuple[Path, str, str]] = []
-    if args.dac_dir.exists():
-        entries.extend(collect_dac(args.dac_dir))
-    if args.baby_dir.exists():
-        entries.extend(collect_baby_crying(args.baby_dir))
-
-    if not entries:
-        raise SystemExit("No audio files found. Check raw dataset paths.")
-
+def get_dac_files(base_dir):
     records = []
-    for idx, (path, label, source) in enumerate(entries):
-        audio = process_audio(path, top_db=args.top_db)
-        if audio is None:
+    if not os.path.exists(base_dir):
+        print(f"Warning: DaC dir {base_dir} not found.")
+        return records
+    for label in os.listdir(base_dir):
+        label_dir = os.path.join(base_dir, label)
+        if os.path.isdir(label_dir) and label in TARGET_CLASSES:
+            for f in glob.glob(os.path.join(label_dir, "*.wav")):
+                records.append({
+                    "filepath": f,
+                    "label": label,
+                    "source_dataset": "DaC"
+                })
+    return records
+
+def get_baby_crying_files(base_dir):
+    records = []
+    if not os.path.exists(base_dir):
+        print(f"Warning: baby_crying dir {base_dir} not found.")
+        return records
+    
+    # Check train and test splits inside baby-crying
+    for split in ["train", "test", "raw"]:
+        split_dir = os.path.join(base_dir, split)
+        if not os.path.exists(split_dir):
             continue
-        out_name = f"{source}_{label}_{idx:06d}.wav"
-        out_path = args.processed_dir / out_name
-        sf.write(out_path, audio, SAMPLE_RATE)
-        records.append(
-            {
-                "filepath": str(out_path),
-                "label": label,
-                "source_dataset": source,
-                "is_augmented": False,
-            }
-        )
+        for label in os.listdir(split_dir):
+            label_dir = os.path.join(split_dir, label)
+            if not os.path.isdir(label_dir):
+                continue
+                
+            # Map labels
+            mapped_label = None
+            if label == "hungry":
+                mapped_label = "hungry"
+            elif label == "sleepy":
+                mapped_label = "tired"
+            elif label == "uncomfortable":
+                mapped_label = "discomfort"
+            elif label == "diaper":
+                mapped_label = "diaper"
+            elif label in ["hug", "awake"]:
+                continue # drop
+            
+            if mapped_label:
+                for f in glob.glob(os.path.join(label_dir, "*.wav")):
+                    records.append({
+                        "filepath": f,
+                        "label": mapped_label,
+                        "source_dataset": "baby_crying"
+                    })
+    return records
 
+def process_audio(filepath):
+    # Load and resample
+    y, sr = librosa.load(filepath, sr=SR, mono=True)
+    
+    # Trim silence
+    y_trimmed, _ = librosa.effects.trim(y, top_db=TOP_DB)
+    
+    # Pad or truncate to fixed length
+    if len(y_trimmed) > SAMPLES:
+        y_final = y_trimmed[:SAMPLES]
+    else:
+        y_final = np.pad(y_trimmed, (0, max(0, SAMPLES - len(y_trimmed))), "constant")
+        
+    # Normalize amplitude to [-1, 1]
+    if np.max(np.abs(y_final)) > 0:
+        y_final = y_final / np.max(np.abs(y_final))
+        
+    return y_final
+
+def main():
+    dac_dir = "data/raw/donateacry-corpus-master/donateacry_corpus_cleaned_and_updated_data/"
+    baby_crying_dir = "data/raw/baby-crying/"
+    processed_dir = "data/processed/"
+    os.makedirs(processed_dir, exist_ok=True)
+    
+    records = get_dac_files(dac_dir) + get_baby_crying_files(baby_crying_dir)
     df = pd.DataFrame(records)
-    if df.empty:
-        raise SystemExit("No valid audio after processing.")
-
-    df = build_splits(df, RANDOM_SEED)
-    df.to_csv(args.splits_path, index=False)
-
-    plot_distribution(df, args.plot_path)
-    print(df["label"].value_counts())
-    print(f"Saved splits to {args.splits_path}")
-
+    print(f"Total files collected: {len(df)}")
+    
+    processed_records = []
+    for i, row in df.iterrows():
+        try:
+            y = process_audio(row["filepath"])
+            filename = f"processed_{i}.wav"
+            out_path = os.path.join(processed_dir, filename)
+            sf.write(out_path, y, SR)
+            
+            processed_records.append({
+                "filepath": out_path,
+                "label": row["label"],
+                "source_dataset": row["source_dataset"]
+            })
+        except Exception as e:
+            print(f"Error processing {row['filepath']}: {e}")
+            
+    df_processed = pd.DataFrame(processed_records)
+    
+    # Stratified 80/10/10 split
+    train_val, test = train_test_split(df_processed, test_size=0.1, stratify=df_processed["label"], random_state=42)
+    train, val = train_test_split(train_val, test_size=1/9, stratify=train_val["label"], random_state=42) # 10% of total is 1/9 of 90%
+    
+    train["split"] = "train"
+    val["split"] = "val"
+    test["split"] = "test"
+    
+    splits_df = pd.concat([train, val, test])
+    splits_df.to_csv(os.path.join(processed_dir, "splits.csv"), index=False)
+    
+    # Plot class distribution
+    plt.figure(figsize=(10, 6))
+    splits_df["label"].value_counts().plot(kind="bar")
+    plt.title("Class Distribution")
+    plt.xlabel("Class")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(os.path.join(processed_dir, "class_distribution.png"))
+    print("Dataset preparation complete. Splits saved.")
 
 if __name__ == "__main__":
     main()

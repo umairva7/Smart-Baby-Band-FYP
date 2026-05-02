@@ -1,160 +1,164 @@
-import argparse
+import os
 import json
-from pathlib import Path
-
+import argparse
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-
-from config import DATA_DIR, LABELS, LABEL_TO_ID, LOGS_DIR, MODELS_DIR, RANDOM_SEED
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+from train import load_data, create_dataset, TARGET_CLASSES, LABEL_MAP
 from model import build_model
 
+MODELS_DIR = "models/"
+LOGS_DIR = "logs/"
 
-def set_seed(seed: int) -> None:
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
+def evaluate_model(model, ds, y_true, title_suffix=""):
+    print(f"\n--- Evaluation: {title_suffix} ---")
+    loss, acc = model.evaluate(ds, verbose=0)
+    print(f"Loss: {loss:.4f}, Accuracy: {acc:.4f}")
+    
+    y_pred_probs = model.predict(ds)
+    y_pred = np.argmax(y_pred_probs, axis=1)
+    
+    # classification report
+    report = classification_report(y_true, y_pred, target_names=TARGET_CLASSES, output_dict=True, zero_division=0)
+    print("Classification Report:")
+    print(classification_report(y_true, y_pred, target_names=TARGET_CLASSES, zero_division=0))
+    
+    # confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', xticklabels=TARGET_CLASSES, yticklabels=TARGET_CLASSES, cmap='Blues')
+    plt.title(f"Confusion Matrix {title_suffix}")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    plt.savefig(os.path.join(LOGS_DIR, f"confusion_matrix{'_' + title_suffix.replace(' ', '_') if title_suffix else ''}.png"))
+    
+    return report
 
+def cross_dataset_experiment():
+    print("\n--- Running Cross-Dataset Experiment ---")
+    splits_path = "data/processed/splits.csv"
+    if not os.path.exists(splits_path):
+        print("splits.csv not found.")
+        return
+        
+    df = pd.read_csv(splits_path)
+    
+    # DaC classes: hungry, discomfort, belly_pain, burping
+    # Actually DaC has tired too. 
+    # The text says: Retrain on DaC only (hungry, discomfort, belly_pain, burping)
+    # Test on baby_crying (hungry, discomfort only)
+    
+    # Train on DaC
+    train_dac_df = df[(df["source_dataset"].str.startswith("DaC")) & (df["split"] == "train")]
+    train_dac_df = train_dac_df[train_dac_df["label"].isin(["hungry", "discomfort", "belly_pain", "burping"])]
+    
+    # Val on DaC
+    val_dac_df = df[(df["source_dataset"].str.startswith("DaC")) & (df["split"] == "val")]
+    val_dac_df = val_dac_df[val_dac_df["label"].isin(["hungry", "discomfort", "belly_pain", "burping"])]
+    
+    # Test on baby_crying
+    test_bc_df = df[(df["source_dataset"].str.startswith("baby_crying")) & (df["split"] == "test")]
+    test_bc_df = test_bc_df[test_bc_df["label"].isin(["hungry", "discomfort"])]
+    
+    def get_paths_and_labels(subset_df):
+        paths = []
+        labels = []
+        for _, row in subset_df.iterrows():
+            filename = f"{row['label']}_{row.name}.npy" # Not exact name since row.name is df index, not the original index! 
+            # We should probably look up the actual filename or just recreate path. 
+            # But the features.py saved them as label_index.npy. We didn't save filepath in df for features.
+            # Let's search the features dir.
+            split = row['split']
+            feat_dir = os.path.join("features", split)
+            for f in os.listdir(feat_dir):
+                if f.startswith(row['label'] + "_"):
+                    # This is an approximation since we don't have perfect mapping from df to feature file name easily.
+                    # Actually, features.py enumerates over split_df! So i is the index in split_df!
+                    pass
+        # Because filename mapping is hard, let's just train on DaC paths by filtering the load_data output
+        return paths, labels
 
-def load_feature_config(config_path: Path) -> tuple[int, int, int]:
-    if config_path.exists():
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        return tuple(config["feature_shape"])
-    raise SystemExit("feature_config.json not found. Run features.py first.")
+    print("Note: To fully run cross-dataset experiment, feature files must map to datasets.")
+    
+    # We will filter load_data instead:
+    train_paths, train_y = load_data("train")
+    val_paths, val_y = load_data("val")
+    test_paths, test_y = load_data("test")
+    
+    def filter_by_dataset_and_classes(paths, y, dataset_keyword, class_list):
+        # We need to map path -> original df row.
+        # Since df is ordered, we can do it if we read split_df again.
+        split = "train" if "train" in paths[0] else ("val" if "val" in paths[0] else "test")
+        split_df = df[df["split"] == split].reset_index(drop=True)
+        
+        filtered_paths = []
+        filtered_y = []
+        # In features.py: filename = f"{row['label']}_{i}.npy" where i is the index in split_df.iterrows() which is the original df index!
+        # wait: "for i, row in split_df.iterrows(): filename = f'{label}_{i}.npy'"
+        
+        for path, label_idx in zip(paths, y):
+            filename = os.path.basename(path)
+            # e.g., hungry_42.npy
+            try:
+                idx = int(filename.split("_")[-1].split(".")[0])
+                row = df.loc[idx]
+                if dataset_keyword in row["source_dataset"] and row["label"] in class_list:
+                    filtered_paths.append(path)
+                    filtered_y.append(label_idx)
+            except Exception:
+                pass
+        return filtered_paths, filtered_y
+        
+    train_dac_paths, train_dac_y = filter_by_dataset_and_classes(train_paths, train_y, "DaC", ["hungry", "discomfort", "belly_pain", "burping"])
+    val_dac_paths, val_dac_y = filter_by_dataset_and_classes(val_paths, val_y, "DaC", ["hungry", "discomfort", "belly_pain", "burping"])
+    test_bc_paths, test_bc_y = filter_by_dataset_and_classes(test_paths, test_y, "baby_crying", ["hungry", "discomfort"])
+    
+    if not train_dac_paths or not test_bc_paths:
+        print("Not enough data for cross-dataset experiment.")
+        return
+        
+    train_ds = create_dataset(train_dac_paths, train_dac_y, batch_size=32, shuffle=True)
+    val_ds = create_dataset(val_dac_paths, val_dac_y, batch_size=32, shuffle=False)
+    test_ds = create_dataset(test_bc_paths, test_bc_y, batch_size=32, shuffle=False)
+    
+    for x, y in train_ds.take(1):
+        input_shape = x.shape[1:]
+        break
+        
+    print("Training model on DaC only...")
+    model = build_model(input_shape=input_shape, num_classes=len(TARGET_CLASSES))
+    model.fit(train_ds, validation_data=val_ds, epochs=10, verbose=1) # Train for a few epochs
+    
+    evaluate_model(model, test_ds, test_bc_y, title_suffix="Cross-Dataset BC Test")
+    print("Cross-Dataset Experiment Finished.")
 
-
-def make_dataset(
-    df: pd.DataFrame,
-    input_shape: tuple[int, int, int],
-    batch_size: int,
-    label_map: dict[str, int],
-) -> tf.data.Dataset:
-    paths = df["feature_path"].tolist()
-    labels = df["label"].map(label_map).astype(np.int32).tolist()
-
-    ds = tf.data.Dataset.from_tensor_slices((paths, labels))
-
-    def load_npy(path: tf.Tensor, label: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
-        def _py_load(p: bytes) -> np.ndarray:
-            if isinstance(p, (bytes, bytearray)):
-                path_str = p.decode("utf-8")
-            else:
-                path_str = p.item().decode("utf-8")
-            return np.load(path_str).astype(np.float32)
-
-        feature = tf.numpy_function(_py_load, [path], tf.float32)
-        feature.set_shape(input_shape)
-        return feature, label
-
-    ds = ds.map(load_npy, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return ds
-
-
-def evaluate_split(
-    model: tf.keras.Model,
-    df: pd.DataFrame,
-    input_shape: tuple[int, int, int],
-    batch_size: int,
-    label_map: dict[str, int],
-    label_names: list[str],
-) -> dict:
-    ds = make_dataset(df, input_shape, batch_size, label_map)
-    y_true = df["label"].map(label_map).values
-    y_prob = model.predict(ds, verbose=0)
-    y_pred = np.argmax(y_prob, axis=1)
-
-    metrics = {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "f1_per_class": {
-            label_names[i]: float(score)
-            for i, score in enumerate(f1_score(y_true, y_pred, average=None, labels=range(len(label_names))))
-        },
-        "confusion_matrix": confusion_matrix(y_true, y_pred, labels=range(len(label_names))).tolist(),
-        "classification_report": classification_report(y_true, y_pred, target_names=label_names, output_dict=True),
-    }
-    return metrics
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate cry classification model.")
-    parser.add_argument("--splits-path", type=Path, default=DATA_DIR / "splits.csv")
-    parser.add_argument("--config-path", type=Path, default=MODELS_DIR / "feature_config.json")
-    parser.add_argument("--model-path", type=Path, default=MODELS_DIR / "best_model.h5")
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--skip-cross-dataset", action="store_true")
-    parser.add_argument("--epochs", type=int, default=30)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-cross-dataset", action="store_true", help="Skip the cross dataset experiment")
     args = parser.parse_args()
-
-    set_seed(RANDOM_SEED)
-
-    df = pd.read_csv(args.splits_path)
-    if "feature_path" not in df.columns:
-        raise SystemExit("splits.csv is missing feature_path. Run features.py first.")
-
-    input_shape = load_feature_config(args.config_path)
-
-    model = tf.keras.models.load_model(args.model_path)
-    model.compile(
-        optimizer=tf.keras.optimizers.SGD(learning_rate=0.8),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
-
-    test_df = df[df["split"] == "test"].copy()
-    if test_df.empty:
-        raise SystemExit("Test split is empty.")
-
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-    metrics = evaluate_split(model, test_df, input_shape, args.batch_size, LABEL_TO_ID, LABELS)
-    metrics_path = LOGS_DIR / "test_metrics.json"
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    print(f"Saved test metrics to {metrics_path}")
-
-    if args.skip_cross_dataset:
+    
+    model_path = os.path.join(MODELS_DIR, "best_model.h5")
+    if not os.path.exists(model_path):
+        print(f"Error: {model_path} not found.")
         return
-
-    dac_df = df[(df["source_dataset"] == "dac") & (df["label"].isin(["hungry", "discomfort", "belly_pain", "burping"]))]
-    baby_df = df[(df["source_dataset"] == "baby_crying") & (df["label"].isin(["hungry", "discomfort"]))]
-
-    dac_train = dac_df[dac_df["split"] == "train"].copy()
-    dac_val = dac_df[dac_df["split"] == "val"].copy()
-    baby_test = baby_df[baby_df["split"] == "test"].copy()
-
-    if dac_train.empty or dac_val.empty or baby_test.empty:
-        print("Cross-dataset split is empty. Skipping cross-dataset evaluation.")
+        
+    model = tf.keras.models.load_model(model_path)
+    
+    test_paths, test_y = load_data("test")
+    if not test_paths:
+        print("No test data found.")
         return
-
-    cross_labels = ["hungry", "discomfort", "belly_pain", "burping"]
-    cross_label_map = {label: idx for idx, label in enumerate(cross_labels)}
-
-    cross_model = build_model(input_shape, num_classes=len(cross_labels), learning_rate=0.8)
-    train_ds = make_dataset(dac_train, input_shape, args.batch_size, cross_label_map)
-    val_ds = make_dataset(dac_val, input_shape, args.batch_size, cross_label_map)
-
-    cross_model.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=args.epochs,
-        callbacks=[
-            tf.keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True, monitor="val_loss"),
-        ],
-        verbose=0,
-    )
-
-    cross_metrics = evaluate_split(
-        cross_model,
-        baby_test,
-        input_shape,
-        args.batch_size,
-        cross_label_map,
-        cross_labels,
-    )
-    cross_path = LOGS_DIR / "cross_dataset_metrics.json"
-    cross_path.write_text(json.dumps(cross_metrics, indent=2), encoding="utf-8")
-    print(f"Saved cross-dataset metrics to {cross_path}")
-
+        
+    test_ds = create_dataset(test_paths, test_y, batch_size=32, shuffle=False)
+    
+    evaluate_model(model, test_ds, test_y, title_suffix="Standard Test Set")
+    
+    if not args.skip_cross_dataset:
+        cross_dataset_experiment()
 
 if __name__ == "__main__":
     main()

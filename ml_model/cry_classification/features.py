@@ -1,138 +1,126 @@
-import argparse
-from pathlib import Path
-
+import os
 import json
-
 import librosa
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
-from config import (
-    DATA_DIR,
-    FEATURES_DIR,
-    HOP_LENGTH,
-    MODELS_DIR,
-    N_FFT,
-    N_MELS,
-    N_MFCC,
-    NUM_SAMPLES,
-    SAMPLE_RATE,
-    SPECTROGRAM_KEEP_BINS,
-    TARGET_FRAMES,
-)
+# Config
+SR = 16000
+DURATION = 3.0
+SAMPLES = int(SR * DURATION)
+N_FFT = 512
+HOP_LENGTH = 375
+N_MELS = 128
+N_MFCC = 40
+FMIN = 0
+FMAX = 8000
 
+PROCESSED_DIR = "data/processed/"
+FEATURES_DIR = "features/"
+MODELS_DIR = "models/"
 
-def fix_frames(feature: np.ndarray, target_frames: int) -> np.ndarray:
-    return librosa.util.fix_length(feature, size=target_frames, axis=1)
-
-
-def extract_features(audio_path: Path) -> np.ndarray:
-    audio, _ = librosa.load(audio_path, sr=SAMPLE_RATE, mono=True)
-    audio = librosa.util.fix_length(audio, size=NUM_SAMPLES)
-
-    stft = librosa.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window="hann")
-    spec = np.abs(stft)
-    spec_db = librosa.amplitude_to_db(spec, ref=np.max)
-
-    mel = librosa.feature.melspectrogram(
-        y=audio,
-        sr=SAMPLE_RATE,
-        n_fft=N_FFT,
-        hop_length=HOP_LENGTH,
-        n_mels=N_MELS,
-        fmin=0,
-        fmax=SAMPLE_RATE // 2,
-    )
-    mel_db = librosa.power_to_db(mel, ref=np.max)
-
-    mfcc = librosa.feature.mfcc(
-        y=audio,
-        sr=SAMPLE_RATE,
-        n_mfcc=N_MFCC,
-        n_fft=N_FFT,
-        hop_length=HOP_LENGTH,
-    )
-    delta = librosa.feature.delta(mfcc)
-    delta2 = librosa.feature.delta(mfcc, order=2)
-    mfcc_block = np.vstack([mfcc, delta, delta2])
-
-    spec_db = fix_frames(spec_db, TARGET_FRAMES)
-    mel_db = fix_frames(mel_db, TARGET_FRAMES)
-    mfcc_block = fix_frames(mfcc_block, TARGET_FRAMES)
-
-    keep_bins = min(SPECTROGRAM_KEEP_BINS, spec_db.shape[0])
-    spec_keep = spec_db[-keep_bins:, :]
-
-    combined = np.vstack([spec_keep, mel_db, mfcc_block])
-
-    min_val = float(combined.min())
-    max_val = float(combined.max())
+def extract_features(audio_path):
+    # Load audio
+    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    if len(y) > SAMPLES:
+        y = y[:SAMPLES]
+    else:
+        y = np.pad(y, (0, max(0, SAMPLES - len(y))), "constant")
+        
+    # b. Spectrogram (STFT)
+    stft = librosa.stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann')
+    mag_stft = np.abs(stft)
+    stft_db = librosa.amplitude_to_db(mag_stft, ref=np.max) # (257, 128)
+    
+    # c. Mel Spectrogram
+    mel = librosa.feature.melspectrogram(y=y, sr=SR, n_fft=N_FFT, hop_length=HOP_LENGTH, 
+                                         n_mels=N_MELS, fmin=FMIN, fmax=FMAX)
+    mel_db = librosa.power_to_db(mel, ref=np.max) # (128, 128)
+    
+    # d. MFCC
+    mfcc = librosa.feature.mfcc(y=y, sr=SR, n_fft=N_FFT, hop_length=HOP_LENGTH, 
+                                n_mfcc=N_MFCC, n_mels=N_MELS, fmin=FMIN, fmax=FMAX)
+    mfcc_delta = librosa.feature.delta(mfcc)
+    mfcc_delta2 = librosa.feature.delta(mfcc, order=2)
+    mfcc_stacked = np.concatenate([mfcc, mfcc_delta, mfcc_delta2], axis=0) # (120, 128)
+    
+    # e. Efficient Graph construction
+    # Remove redundant bins from STFT (keep high freq bins not captured well by Mel)
+    # Total shape should be ~305. 128 (mel) + 120 (mfcc) = 248. 305 - 248 = 57 bins.
+    # We take the last 57 bins of stft_db.
+    stft_high = stft_db[-57:, :]
+    
+    # Concatenate all
+    # To match time frames exactly to 128, since len(y)=48000, 48000//375 = 128 frames (actually 129).
+    # We truncate to 128 frames across time axis.
+    stft_high = stft_high[:, :128]
+    mel_db = mel_db[:, :128]
+    mfcc_stacked = mfcc_stacked[:, :128]
+    
+    if stft_high.shape[1] < 128:
+        pad_width = 128 - stft_high.shape[1]
+        stft_high = np.pad(stft_high, ((0,0), (0,pad_width)), 'constant')
+        mel_db = np.pad(mel_db, ((0,0), (0,pad_width)), 'constant')
+        mfcc_stacked = np.pad(mfcc_stacked, ((0,0), (0,pad_width)), 'constant')
+        
+    combined = np.concatenate([stft_high, mel_db, mfcc_stacked], axis=0) # (305, 128)
+    
+    # f. Normalize per-channel (here per-feature matrix) to [0, 1]
+    # To avoid divide by zero, add epsilon
+    min_val = np.min(combined)
+    max_val = np.max(combined)
     if max_val > min_val:
         combined = (combined - min_val) / (max_val - min_val)
     else:
-        combined = np.zeros_like(combined)
+        combined = combined - min_val
+        
+    # g. Add channel dim
+    features = np.expand_dims(combined, axis=-1) # (305, 128, 1)
+    return features
 
-    return combined.astype(np.float32)[..., np.newaxis]
-
-
-def save_feature_config(feature_shape: tuple[int, ...], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def main():
+    os.makedirs(FEATURES_DIR, exist_ok=True)
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    
+    splits_path = os.path.join(PROCESSED_DIR, "splits.csv")
+    if not os.path.exists(splits_path):
+        print(f"Error: {splits_path} not found. Run dataset.py and augment.py first.")
+        return
+        
+    df = pd.read_csv(splits_path)
+    
+    shape = None
+    
+    for split in ["train", "val", "test"]:
+        os.makedirs(os.path.join(FEATURES_DIR, split), exist_ok=True)
+        split_df = df[df["split"] == split]
+        
+        for i, row in tqdm(split_df.iterrows(), total=len(split_df), desc=f"Extracting {split}"):
+            feat = extract_features(row["filepath"])
+            if shape is None:
+                shape = feat.shape
+                
+            filename = f"{row['label']}_{i}.npy"
+            out_path = os.path.join(FEATURES_DIR, split, filename)
+            np.save(out_path, feat)
+            
+    # Save config
     config = {
-        "sample_rate": SAMPLE_RATE,
-        "duration_sec": NUM_SAMPLES / SAMPLE_RATE,
+        "sr": SR,
+        "duration": DURATION,
         "n_fft": N_FFT,
         "hop_length": HOP_LENGTH,
         "n_mels": N_MELS,
         "n_mfcc": N_MFCC,
-        "spectrogram_keep_bins": SPECTROGRAM_KEEP_BINS,
-        "target_frames": TARGET_FRAMES,
-        "feature_shape": list(feature_shape),
+        "fmin": FMIN,
+        "fmax": FMAX,
+        "feature_shape": shape
     }
-    output_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Extract features for cry classification.")
-    parser.add_argument("--splits-path", type=Path, default=DATA_DIR / "splits.csv")
-    parser.add_argument("--features-dir", type=Path, default=FEATURES_DIR)
-    parser.add_argument("--config-path", type=Path, default=MODELS_DIR / "feature_config.json")
-    parser.add_argument("--overwrite", action="store_true")
-    args = parser.parse_args()
-
-    df = pd.read_csv(args.splits_path)
-    if "filepath" not in df.columns:
-        raise SystemExit("splits.csv is missing the filepath column.")
-
-    feature_paths: list[str] = []
-    feature_shape: tuple[int, ...] | None = None
-
-    for idx, row in df.iterrows():
-        split = row.get("split", "train")
-        label = row["label"]
-        out_dir = args.features_dir / split
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        out_path = out_dir / f"{label}_{idx:06d}.npy"
-        if out_path.exists() and not args.overwrite:
-            feature = np.load(out_path)
-        else:
-            feature = extract_features(Path(row["filepath"]))
-            np.save(out_path, feature)
-
-        if feature_shape is None:
-            feature_shape = feature.shape
-
-        feature_paths.append(str(out_path))
-
-    df["feature_path"] = feature_paths
-    df.to_csv(args.splits_path, index=False)
-
-    if feature_shape is None:
-        raise SystemExit("No features were generated.")
-
-    save_feature_config(feature_shape, args.config_path)
-    print(f"Saved features and updated {args.splits_path}")
-
+    with open(os.path.join(MODELS_DIR, "feature_config.json"), "w") as f:
+        json.dump(config, f, indent=4)
+        
+    print(f"Feature extraction complete. Shape: {shape}. Config saved.")
 
 if __name__ == "__main__":
     main()
