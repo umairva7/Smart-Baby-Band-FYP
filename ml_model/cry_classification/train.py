@@ -58,15 +58,15 @@ def _callbacks(run_dir: Path) -> list[keras.callbacks.Callback]:
     return [
         keras.callbacks.ModelCheckpoint(
             filepath=str(BEST_MODEL_PATH),
-            monitor="val_accuracy",
-            mode="max",
+            monitor="val_loss",
+            mode="min",
             save_best_only=True,
             verbose=1,
         ),
         keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss",
             factor=0.5,
-            patience=3,
+            patience=5,
             min_lr=1e-6,
             verbose=1,
         ),

@@ -146,8 +146,12 @@ def _compute_split(rows: list[dict[str, str]]) -> tuple[np.ndarray, np.ndarray]:
 
 def _normalize_inplace(X: np.ndarray, mean: np.ndarray, std: np.ndarray) -> None:
     eps = 1e-6
-    for c in range(X.shape[-1]):
-        X[..., c] = (X[..., c] - mean[c]) / (std[c] + eps)
+    # mean and std have shape (H, C). X has shape (N, H, W, C).
+    # We want to normalize along the frequency (H) and channel (C) axes.
+    # Reshape mean/std to (1, H, 1, C) to broadcast across N and W.
+    mean_reshaped = mean[np.newaxis, :, np.newaxis, :]
+    std_reshaped = std[np.newaxis, :, np.newaxis, :]
+    X[...] = (X - mean_reshaped) / (std_reshaped + eps)
 
 
 def build_feature_cache(splits_csv: Path = SPLITS_CSV) -> Path:
@@ -173,10 +177,11 @@ def build_feature_cache(splits_csv: Path = SPLITS_CSV) -> Path:
     print(f"[features] computing TRAIN ({len(by_split['train'])} samples)")
     X_train, y_train = _compute_split(by_split["train"])
 
-    mean = X_train.mean(axis=(0, 1, 2)).astype(np.float32)
-    std = X_train.std(axis=(0, 1, 2)).astype(np.float32)
+    # Axis 0 is sample, Axis 2 is time frame. We compute mean/std for each freq bin (Axis 1) and channel (Axis 3).
+    mean = X_train.mean(axis=(0, 2)).astype(np.float32)
+    std = X_train.std(axis=(0, 2)).astype(np.float32)
     np.savez(NORM_STATS_PATH, mean=mean, std=std)
-    print(f"[features] saved norm stats -> {NORM_STATS_PATH} mean={mean} std={std}")
+    print(f"[features] saved norm stats -> {NORM_STATS_PATH} mean shape={mean.shape} std shape={std.shape}")
 
     _normalize_inplace(X_train, mean, std)
     np.save(FEATURES_DIR / "X_train.npy", X_train)
