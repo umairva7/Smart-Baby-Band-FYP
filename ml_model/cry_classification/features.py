@@ -1,212 +1,137 @@
-"""Feature extraction for the cry classification model.
-
-Each WAV is converted into a single ``(128, 128, 2)`` float32 tensor:
-
-    Channel 0 -> mel spectrogram (128 mel bins x 128 time frames, dB-scaled)
-    Channel 1 -> MFCC stack (40 coeffs + delta + delta-delta) resized to 128x128
-
-Per-channel z-score normalization is applied using statistics computed from
-the training split only; the stats are persisted to ``features/norm_stats.npz``
-so inference paths can reuse them.
-
-Run as a script::
-
-    python -m cry_classification.features
-"""
-
-from __future__ import annotations
-
-import csv
+import argparse
 from pathlib import Path
+
+import json
 
 import librosa
 import numpy as np
-from scipy.ndimage import zoom
+import pandas as pd
 
-from dataset import (
-    LABEL_TO_INDEX,
-    PROJECT_ROOT,
-    SPLITS_CSV,
-    SR,
-    TARGET_SAMPLES,
+from config import (
+    DATA_DIR,
+    FEATURES_DIR,
+    HOP_LENGTH,
+    MODELS_DIR,
+    N_FFT,
+    N_MELS,
+    N_MFCC,
+    NUM_SAMPLES,
+    SAMPLE_RATE,
+    SPECTROGRAM_KEEP_BINS,
+    TARGET_FRAMES,
 )
 
-# ---------------------------------------------------------------------------
-# Feature parameters
-# ---------------------------------------------------------------------------
 
-N_MELS: int = 128
-N_FFT: int = 2048
-HOP_LENGTH: int = 375  # ~129 frames for a 3s @ 16kHz clip
-N_MFCC: int = 40
-TARGET_HW: tuple[int, int] = (128, 128)
-INPUT_CHANNELS: int = 2
-
-FEATURES_DIR: Path = PROJECT_ROOT / "features"
-NORM_STATS_PATH: Path = FEATURES_DIR / "norm_stats.npz"
+def fix_frames(feature: np.ndarray, target_frames: int) -> np.ndarray:
+    return librosa.util.fix_length(feature, size=target_frames, axis=1)
 
 
-# ---------------------------------------------------------------------------
-# Single-clip feature extraction
-# ---------------------------------------------------------------------------
+def extract_features(audio_path: Path) -> np.ndarray:
+    audio, _ = librosa.load(audio_path, sr=SAMPLE_RATE, mono=True)
+    audio = librosa.util.fix_length(audio, size=NUM_SAMPLES)
 
-
-def _resize(arr: np.ndarray, target: tuple[int, int]) -> np.ndarray:
-    """Resize a 2D array to ``target`` using cubic ``scipy.ndimage.zoom``."""
-    h, w = arr.shape
-    th, tw = target
-    if (h, w) == (th, tw):
-        return arr.astype(np.float32, copy=False)
-    return zoom(arr, (th / h, tw / w), order=3).astype(np.float32, copy=False)
-
-
-def _load_audio(path: Path) -> np.ndarray:
-    y, _ = librosa.load(str(path), sr=SR, mono=True)
-    if y.size < TARGET_SAMPLES:
-        y = np.pad(y, (0, TARGET_SAMPLES - y.size))
-    else:
-        y = y[:TARGET_SAMPLES]
-    return y.astype(np.float32, copy=False)
-
-
-def extract_features(wav: np.ndarray | Path | str) -> np.ndarray:
-    """Compute the ``(128, 128, 2)`` feature tensor for a single clip.
-
-    ``wav`` may be a numpy waveform (assumed 16 kHz mono, 3 s) or a path to a
-    WAV file that will be loaded and length-normalized first.
-    """
-    if isinstance(wav, (str, Path)):
-        y = _load_audio(Path(wav))
-    else:
-        y = np.asarray(wav, dtype=np.float32)
-        if y.size < TARGET_SAMPLES:
-            y = np.pad(y, (0, TARGET_SAMPLES - y.size))
-        else:
-            y = y[:TARGET_SAMPLES]
+    stft = librosa.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH, window="hann")
+    spec = np.abs(stft)
+    spec_db = librosa.amplitude_to_db(spec, ref=np.max)
 
     mel = librosa.feature.melspectrogram(
-        y=y,
-        sr=SR,
+        y=audio,
+        sr=SAMPLE_RATE,
         n_fft=N_FFT,
         hop_length=HOP_LENGTH,
         n_mels=N_MELS,
-        power=2.0,
+        fmin=0,
+        fmax=SAMPLE_RATE // 2,
     )
-    mel_db = librosa.power_to_db(mel, ref=np.max).astype(np.float32)
-    mel_db = _resize(mel_db, TARGET_HW)
+    mel_db = librosa.power_to_db(mel, ref=np.max)
 
     mfcc = librosa.feature.mfcc(
-        y=y,
-        sr=SR,
+        y=audio,
+        sr=SAMPLE_RATE,
         n_mfcc=N_MFCC,
         n_fft=N_FFT,
         hop_length=HOP_LENGTH,
-    ).astype(np.float32)
-    delta = librosa.feature.delta(mfcc).astype(np.float32)
-    delta2 = librosa.feature.delta(mfcc, order=2).astype(np.float32)
-    mfcc_stack = np.vstack([mfcc, delta, delta2])  # (120, T)
-    mfcc_resized = _resize(mfcc_stack, TARGET_HW)
+    )
+    delta = librosa.feature.delta(mfcc)
+    delta2 = librosa.feature.delta(mfcc, order=2)
+    mfcc_block = np.vstack([mfcc, delta, delta2])
 
-    return np.stack([mel_db, mfcc_resized], axis=-1).astype(np.float32)
+    spec_db = fix_frames(spec_db, TARGET_FRAMES)
+    mel_db = fix_frames(mel_db, TARGET_FRAMES)
+    mfcc_block = fix_frames(mfcc_block, TARGET_FRAMES)
 
+    keep_bins = min(SPECTROGRAM_KEEP_BINS, spec_db.shape[0])
+    spec_keep = spec_db[-keep_bins:, :]
 
-# ---------------------------------------------------------------------------
-# Cache builder
-# ---------------------------------------------------------------------------
+    combined = np.vstack([spec_keep, mel_db, mfcc_block])
 
+    min_val = float(combined.min())
+    max_val = float(combined.max())
+    if max_val > min_val:
+        combined = (combined - min_val) / (max_val - min_val)
+    else:
+        combined = np.zeros_like(combined)
 
-def _read_splits(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Run dataset.make_splits() first."
-        )
-    with path.open("r") as fh:
-        return list(csv.DictReader(fh))
-
-
-def _resolve(path_str: str) -> Path:
-    p = Path(path_str)
-    if not p.is_absolute():
-        p = PROJECT_ROOT / p
-    return p
+    return combined.astype(np.float32)[..., np.newaxis]
 
 
-def _compute_split(rows: list[dict[str, str]]) -> tuple[np.ndarray, np.ndarray]:
-    n = len(rows)
-    X = np.empty((n, TARGET_HW[0], TARGET_HW[1], INPUT_CHANNELS), dtype=np.float32)
-    y = np.empty(n, dtype=np.int64)
-    for i, row in enumerate(rows):
-        path = _resolve(row["path"])
-        X[i] = extract_features(path)
-        y[i] = LABEL_TO_INDEX[row["label"]]
-        if (i + 1) % 200 == 0 or i == n - 1:
-            print(f"    progress {i + 1}/{n}")
-    return X, y
-
-
-def _normalize_inplace(X: np.ndarray, mean: np.ndarray, std: np.ndarray) -> None:
-    eps = 1e-6
-    # mean and std have shape (H, C). X has shape (N, H, W, C).
-    # We want to normalize along the frequency (H) and channel (C) axes.
-    # Reshape mean/std to (1, H, 1, C) to broadcast across N and W.
-    mean_reshaped = mean[np.newaxis, :, np.newaxis, :]
-    std_reshaped = std[np.newaxis, :, np.newaxis, :]
-    X[...] = (X - mean_reshaped) / (std_reshaped + eps)
-
-
-def build_feature_cache(splits_csv: Path = SPLITS_CSV) -> Path:
-    """Compute and save per-split ``X_*.npy`` / ``y_*.npy`` caches.
-
-    The training split is processed first so its per-channel mean/std can be
-    used to z-score normalize all three splits consistently.
-    """
-    rows = _read_splits(splits_csv)
-
-    by_split: dict[str, list[dict[str, str]]] = {"train": [], "val": [], "test": []}
-    for row in rows:
-        if row["split"] not in by_split:
-            continue
-        by_split[row["split"]].append(row)
-
-    for split, items in by_split.items():
-        if not items:
-            raise RuntimeError(f"No rows found for split={split} in {splits_csv}")
-
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-
-    print(f"[features] computing TRAIN ({len(by_split['train'])} samples)")
-    X_train, y_train = _compute_split(by_split["train"])
-
-    # Axis 0 is sample, Axis 2 is time frame. We compute mean/std for each freq bin (Axis 1) and channel (Axis 3).
-    mean = X_train.mean(axis=(0, 2)).astype(np.float32)
-    std = X_train.std(axis=(0, 2)).astype(np.float32)
-    np.savez(NORM_STATS_PATH, mean=mean, std=std)
-    print(f"[features] saved norm stats -> {NORM_STATS_PATH} mean shape={mean.shape} std shape={std.shape}")
-
-    _normalize_inplace(X_train, mean, std)
-    np.save(FEATURES_DIR / "X_train.npy", X_train)
-    np.save(FEATURES_DIR / "y_train.npy", y_train)
-    print(f"[features] saved X_train{X_train.shape} y_train{y_train.shape}")
-    del X_train, y_train
-
-    for split in ("val", "test"):
-        print(f"[features] computing {split.upper()} ({len(by_split[split])} samples)")
-        X, y = _compute_split(by_split[split])
-        _normalize_inplace(X, mean, std)
-        np.save(FEATURES_DIR / f"X_{split}.npy", X)
-        np.save(FEATURES_DIR / f"y_{split}.npy", y)
-        print(f"[features] saved X_{split}{X.shape} y_{split}{y.shape}")
-
-    return FEATURES_DIR
-
-
-def load_norm_stats(path: Path = NORM_STATS_PATH) -> tuple[np.ndarray, np.ndarray]:
-    data = np.load(path)
-    return data["mean"], data["std"]
+def save_feature_config(feature_shape: tuple[int, ...], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    config = {
+        "sample_rate": SAMPLE_RATE,
+        "duration_sec": NUM_SAMPLES / SAMPLE_RATE,
+        "n_fft": N_FFT,
+        "hop_length": HOP_LENGTH,
+        "n_mels": N_MELS,
+        "n_mfcc": N_MFCC,
+        "spectrogram_keep_bins": SPECTROGRAM_KEEP_BINS,
+        "target_frames": TARGET_FRAMES,
+        "feature_shape": list(feature_shape),
+    }
+    output_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def main() -> None:
-    build_feature_cache()
+    parser = argparse.ArgumentParser(description="Extract features for cry classification.")
+    parser.add_argument("--splits-path", type=Path, default=DATA_DIR / "splits.csv")
+    parser.add_argument("--features-dir", type=Path, default=FEATURES_DIR)
+    parser.add_argument("--config-path", type=Path, default=MODELS_DIR / "feature_config.json")
+    parser.add_argument("--overwrite", action="store_true")
+    args = parser.parse_args()
+
+    df = pd.read_csv(args.splits_path)
+    if "filepath" not in df.columns:
+        raise SystemExit("splits.csv is missing the filepath column.")
+
+    feature_paths: list[str] = []
+    feature_shape: tuple[int, ...] | None = None
+
+    for idx, row in df.iterrows():
+        split = row.get("split", "train")
+        label = row["label"]
+        out_dir = args.features_dir / split
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path = out_dir / f"{label}_{idx:06d}.npy"
+        if out_path.exists() and not args.overwrite:
+            feature = np.load(out_path)
+        else:
+            feature = extract_features(Path(row["filepath"]))
+            np.save(out_path, feature)
+
+        if feature_shape is None:
+            feature_shape = feature.shape
+
+        feature_paths.append(str(out_path))
+
+    df["feature_path"] = feature_paths
+    df.to_csv(args.splits_path, index=False)
+
+    if feature_shape is None:
+        raise SystemExit("No features were generated.")
+
+    save_feature_config(feature_shape, args.config_path)
+    print(f"Saved features and updated {args.splits_path}")
 
 
 if __name__ == "__main__":

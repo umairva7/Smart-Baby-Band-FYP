@@ -1,251 +1,154 @@
-"""Offline data augmentation for the train split.
-
-The plan calls for a 4x expansion (1 original + 3 augmented variants) of the
-training split only. Validation and test rows are left untouched to keep the
-evaluation metrics honest.
-
-Each augmented variant randomly applies one of:
-    - time stretch with rate in U(0.8, 1.2)
-    - pitch shift with n_steps in U(-2, +2) semitones
-    - both, applied sequentially (stretch first, then pitch shift)
-
-The result is re-padded / truncated to a fixed 3-second window so the
-augmented files are drop-in replacements for the originals.
-
-Run as a script::
-
-    python -m cry_classification.augment
-"""
-
-from __future__ import annotations
-
 import argparse
-import csv
+import random
 from pathlib import Path
 
 import librosa
 import numpy as np
+import pandas as pd
 import soundfile as sf
 
-from dataset import (
-    LABELS,
-    PROCESSED_DIR,
-    PROJECT_ROOT,
+from config import (
+    AUGMENTED_DIR,
+    DATA_DIR,
+    NUM_SAMPLES,
     RANDOM_SEED,
-    SPLITS_CSV,
-    SR,
-    TARGET_SAMPLES,
+    RAW_DIR,
+    SAMPLE_RATE,
 )
 
-NUM_VARIANTS: int = 3
-STRETCH_RANGE: tuple[float, float] = (0.8, 1.2)
-PITCH_RANGE: tuple[float, float] = (-2.0, 2.0)
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
 
 
-def _fix_length(y: np.ndarray) -> np.ndarray:
-    if y.size < TARGET_SAMPLES:
-        return np.pad(y, (0, TARGET_SAMPLES - y.size))
-    return y[:TARGET_SAMPLES]
+def load_audio(path: Path) -> np.ndarray:
+    audio, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True)
+    if audio.size == 0:
+        return audio
+    return audio
 
 
-def _augment_once(y: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    mode = rng.integers(0, 3)  # 0=stretch, 1=pitch, 2=both
-    out = y.astype(np.float32, copy=True)
-    if mode in (0, 2):
-        rate = float(rng.uniform(*STRETCH_RANGE))
-        out = librosa.effects.time_stretch(out, rate=rate)
-    if mode in (1, 2):
-        steps = float(rng.uniform(*PITCH_RANGE))
-        out = librosa.effects.pitch_shift(out, sr=SR, n_steps=steps)
-    return _fix_length(out).astype(np.float32, copy=False)
+def normalize_audio(audio: np.ndarray) -> np.ndarray:
+    peak = np.max(np.abs(audio)) if audio.size else 0
+    return audio / peak if peak > 0 else audio
 
 
-def _read_splits(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Run dataset.make_splits() first."
-        )
-    with path.open("r") as fh:
-        return list(csv.DictReader(fh))
+def add_noise_at_snr(audio: np.ndarray, noise: np.ndarray, snr_db: float) -> np.ndarray:
+    signal_power = np.mean(audio ** 2) + 1e-12
+    noise_power = np.mean(noise ** 2) + 1e-12
+    scale = np.sqrt(signal_power / (10 ** (snr_db / 10) * noise_power))
+    return audio + noise * scale
 
 
-def _resolve(path_str: str) -> Path:
-    p = Path(path_str)
-    if not p.is_absolute():
-        p = PROJECT_ROOT / p
-    return p
+def time_mask(audio: np.ndarray, min_pct: float, max_pct: float) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+    mask_len = int(len(audio) * random.uniform(min_pct, max_pct))
+    if mask_len <= 0:
+        return audio
+    start = random.randint(0, max(0, len(audio) - mask_len))
+    audio = audio.copy()
+    audio[start : start + mask_len] = 0
+    return audio
 
 
-def _relpath(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path.resolve())
+def augment_audio(audio: np.ndarray, noise_paths: list[Path]) -> np.ndarray:
+    rate = random.uniform(0.85, 1.15)
+    audio = librosa.effects.time_stretch(audio, rate)
+
+    steps = random.uniform(-2.0, 2.0)
+    audio = librosa.effects.pitch_shift(audio, sr=SAMPLE_RATE, n_steps=steps)
+
+    audio = librosa.util.fix_length(audio, size=NUM_SAMPLES)
+
+    if noise_paths:
+        noise_path = random.choice(noise_paths)
+        noise = load_audio(noise_path)
+        noise = librosa.util.fix_length(noise, size=NUM_SAMPLES)
+        snr_db = random.uniform(10.0, 20.0)
+        audio = add_noise_at_snr(audio, noise, snr_db)
+
+    audio = time_mask(audio, min_pct=0.05, max_pct=0.15)
+    audio = normalize_audio(audio)
+    return audio
 
 
-def _group_by_label(rows: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
-    grouped = {label: [] for label in LABELS}
-    for row in rows:
-        grouped.setdefault(row["label"], []).append(row)
-    return grouped
-
-
-def _target_counts(
-    train_rows: list[dict[str, str]],
-    mode: str,
-    num_variants: int,
-    target_count: int | None,
-) -> dict[str, int]:
-    grouped = _group_by_label(train_rows)
-    orig_counts = {label: len(rows) for label, rows in grouped.items()}
-
-    if mode == "fixed":
-        return {label: count * (num_variants + 1) for label, count in orig_counts.items()}
-
-    if mode != "balanced":
-        raise ValueError(f"Unsupported mode: {mode}")
-
-    default_target = max(orig_counts.values()) if orig_counts else 0
-    target = target_count if target_count is not None else default_target
-    return {label: max(target, count) for label, count in orig_counts.items()}
-
-
-def expand_train(
-    splits_csv: Path = SPLITS_CSV,
-    *,
-    num_variants: int = NUM_VARIANTS,
-    seed: int = RANDOM_SEED,
-    mode: str = "fixed",
-    target_count: int | None = None,
-) -> Path:
-    """Generate augmented variants for every train row and rewrite splits.csv.
-
-    Idempotent at the file level: if an augmented WAV already exists on disk
-    it is not regenerated, and ``splits.csv`` is rebuilt to reflect both
-    originals and augmented files exactly once.
-    """
-    rng = np.random.default_rng(seed)
-    rows = _read_splits(splits_csv)
-
-    train_rows = [r for r in rows if r["split"] == "train"]
-    other_rows = [r for r in rows if r["split"] != "train"]
-
-    augmented: list[dict[str, str]] = []
-    written = 0
-    skipped = 0
-    failed = 0
-
-    grouped = _group_by_label(train_rows)
-    targets = _target_counts(train_rows, mode, num_variants, target_count)
-
-    for label in LABELS:
-        rows_for_label = grouped.get(label, [])
-        if not rows_for_label:
-            continue
-
-        desired_aug = max(0, targets[label] - len(rows_for_label))
-        if desired_aug == 0:
-            continue
-
-        for aug_idx in range(1, desired_aug + 1):
-            base_row = rows_for_label[(aug_idx - 1) % len(rows_for_label)]
-            src = _resolve(base_row["path"])
-            if not src.exists():
-                print(f"[expand_train] missing source {src}")
-                failed += 1
-                continue
-
-            dst = src.with_name(f"{src.stem}_aug{aug_idx}.wav")
-            if dst.exists():
-                augmented.append(
-                    {"path": _relpath(dst), "label": label, "split": "train"}
-                )
-                skipped += 1
-                continue
-            try:
-                y, _ = librosa.load(str(src), sr=SR, mono=True)
-                y_aug = _augment_once(y, rng)
-                sf.write(str(dst), y_aug, SR, subtype="PCM_16")
-                augmented.append(
-                    {"path": _relpath(dst), "label": label, "split": "train"}
-                )
-                written += 1
-            except Exception as exc:  # pragma: no cover - defensive logging
-                print(f"[expand_train] FAILED {src} aug {aug_idx}: {exc}")
-                failed += 1
-
-    # Rebuild splits.csv: originals (all splits) + augmented (train only).
-    with splits_csv.open("w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["path", "label", "split"])
-        for row in train_rows + augmented + other_rows:
-            writer.writerow([row["path"], row["label"], row["split"]])
-
-    _print_summary(train_rows, augmented, other_rows, written, skipped, failed)
-    return splits_csv
-
-
-def _print_summary(
-    train_rows: list[dict[str, str]],
-    augmented: list[dict[str, str]],
-    other_rows: list[dict[str, str]],
-    written: int,
-    skipped: int,
-    failed: int,
-) -> None:
-    n_train_orig = len(train_rows)
-    n_aug = len(augmented)
-    n_total_train = n_train_orig + n_aug
-    n_val = sum(1 for r in other_rows if r["split"] == "val")
-    n_test = sum(1 for r in other_rows if r["split"] == "test")
-
-    print(
-        f"[expand_train] written={written} skipped={skipped} failed={failed}"
-    )
-    print(
-        f"[expand_train] train: {n_train_orig} originals + {n_aug} augmented "
-        f"= {n_total_train} (val={n_val}, test={n_test})"
-    )
-
-    print("[expand_train] per-class train counts (incl. augmented):")
-    for label in LABELS:
-        n_orig = sum(1 for r in train_rows if r["label"] == label)
-        n_a = sum(1 for r in augmented if r["label"] == label)
-        print(f"  {label:<12} orig={n_orig:>4} aug={n_a:>4} total={n_orig + n_a:>4}")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Augment train split audio.")
-    parser.add_argument(
-        "--mode",
-        choices=["fixed", "balanced"],
-        default="fixed",
-        help="fixed: each sample gets N variants (default); balanced: upsample each class to a target count.",
-    )
-    parser.add_argument(
-        "--num-variants",
-        type=int,
-        default=NUM_VARIANTS,
-        help="Used in fixed mode. Number of augmented copies per original.",
-    )
-    parser.add_argument(
-        "--target-count",
-        type=int,
-        default=None,
-        help="Used in balanced mode. If omitted, uses the largest original class count.",
-    )
-    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
-    return parser.parse_args()
+def iter_noise_files(noise_dir: Path) -> list[Path]:
+    if not noise_dir.exists():
+        return []
+    return list(noise_dir.rglob("*.wav"))
 
 
 def main() -> None:
-    args = parse_args()
-    expand_train(
-        num_variants=args.num_variants,
-        seed=args.seed,
-        mode=args.mode,
-        target_count=args.target_count,
-    )
+    parser = argparse.ArgumentParser(description="Offline audio augmentation.")
+    parser.add_argument("--splits-path", type=Path, default=DATA_DIR / "splits.csv")
+    parser.add_argument("--processed-dir", type=Path, default=PROCESSED_DIR)
+    parser.add_argument("--augmented-dir", type=Path, default=AUGMENTED_DIR)
+    parser.add_argument("--noise-dir", type=Path, default=RAW_DIR / "esc50")
+    parser.add_argument("--target-per-class", type=int, default=1500)
+    args = parser.parse_args()
+
+    set_seed(RANDOM_SEED)
+
+    df = pd.read_csv(args.splits_path)
+    if "split" not in df.columns:
+        raise SystemExit("splits.csv is missing the split column.")
+
+    train_df = df[df["split"] == "train"].copy()
+    if "is_augmented" in train_df.columns:
+        augmented_mask = train_df["is_augmented"].astype(str).str.lower().isin(["true", "1", "yes"])
+        train_df = train_df[~augmented_mask]
+
+    if train_df.empty:
+        raise SystemExit("No training samples found.")
+
+    noise_paths = iter_noise_files(args.noise_dir)
+    if not noise_paths:
+        print("Warning: no noise files found, skipping noise augmentation.")
+
+    args.augmented_dir.mkdir(parents=True, exist_ok=True)
+
+    counts = train_df["label"].value_counts().to_dict()
+    new_rows = []
+    counter = 0
+
+    for label, count in counts.items():
+        target = args.target_per_class
+        to_create = max(0, target - count)
+        if to_create == 0:
+            continue
+
+        class_rows = train_df[train_df["label"] == label].reset_index(drop=True)
+        for _ in range(to_create):
+            row = class_rows.iloc[random.randrange(len(class_rows))]
+            audio = load_audio(Path(row["filepath"]))
+            if audio.size == 0:
+                continue
+            augmented = augment_audio(audio, noise_paths)
+            out_name = f"aug_{label}_{counter:06d}.wav"
+            out_path = args.augmented_dir / out_name
+            sf.write(out_path, augmented, SAMPLE_RATE)
+            counter += 1
+
+            new_rows.append(
+                {
+                    "filepath": str(out_path),
+                    "label": label,
+                    "split": "train",
+                    "source_dataset": row.get("source_dataset", "augmented"),
+                    "is_augmented": True,
+                }
+            )
+
+    if not new_rows:
+        print("No augmentation needed.")
+        return
+
+    new_df = pd.DataFrame(new_rows)
+    df = pd.concat([df, new_df], ignore_index=True)
+    df.to_csv(args.splits_path, index=False)
+    print(f"Added {len(new_rows)} augmented samples.")
 
 
 if __name__ == "__main__":
