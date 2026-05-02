@@ -66,15 +66,22 @@ python export.py                                # .keras / .h5 / .tflite / int8 
 
 ```
 Input (128, 128, 2)
- -> Conv2D(32) + BN + ReLU + MaxPool
- -> Conv2D(64) + BN + ReLU + MaxPool
- -> Conv2D(128) + BN + ReLU + MaxPool
+ -> SpecAugment (freq mask x2, time mask x2, training only)
+ -> Conv2D(32) + BN + ReLU + MaxPool  [L2=1e-4]
+ -> Conv2D(64) + BN + ReLU + MaxPool  [L2=1e-4]
+ -> Conv2D(128) + BN + ReLU + MaxPool [L2=1e-4]
  -> Reshape to (256, 128) sequence
  -> MultiHeadAttention(heads=4, key_dim=32)
  -> GlobalAveragePooling1D
- -> Dense(128) + Dropout(0.3)
- -> Dense(5, softmax)
+ -> Dense(128) + Dropout(0.5)         [L2=1e-4]
+ -> Dense(5, softmax)                [L2=1e-4]
 ```
+
+**Regularization:** L2 weight decay (`1e-4`) on all Conv2D and Dense
+kernels, dropout increased to `0.5`, and **SpecAugment** (frequency
+masking + time masking) applied on the spectrogram tensors during
+training only — more robust than audio-domain augmentation because it
+operates post-compression.
 
 Loss `sparse_categorical_crossentropy`, optimizer `Adam(lr=1e-3)`,
 `ReduceLROnPlateau(factor=0.5, patience=3)`,
