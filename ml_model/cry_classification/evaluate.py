@@ -149,7 +149,8 @@ def main():
         print(f"Error: {model_path} not found.")
         return
         
-    model = tf.keras.models.load_model(model_path)
+    from model import SparseCategoricalFocalLoss
+    model = tf.keras.models.load_model(model_path, custom_objects={'SparseCategoricalFocalLoss': SparseCategoricalFocalLoss})
     
     test_paths, test_y = load_data("test")
     if not test_paths:

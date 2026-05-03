@@ -32,10 +32,10 @@ smart_baby_band/
 ## 2. Model Architecture
 
 The deep learning model is built sequentially to process audio as spatial-temporal data:
-1. **CNN Local Blocks (4x):** Extracts local spatial-frequency features using 5x5 Conv2D layers with stride/pooling, Batch Normalization, ReLU, and Dropout(0.3).
-2. **Multi-Head Attention:** Focuses on globally significant features across the frequency and time domains.
-3. **Stacked LSTM (2x):** Learns temporal dependencies and sequence structures over time.
-4. **Classifier:** Dense layer with Softmax activation outputting probabilities for the 4 target classes.
+1. **CNN Local Blocks (4x):** Extracts local spatial-frequency features using 5x5 Conv2D layers with strides=(1, 1), Batch Normalization, ReLU, L2 Regularization, and Dropout(0.3).
+2. **Stacked LSTM (2x):** Learns temporal dependencies directly from the flattened CNN sequence without crushing the time axis. Uses LSTM(128) returning sequences, followed by LSTM(64) compressing the final sequence state.
+3. **Classifier:** Dense layer with Softmax activation outputting probabilities for the 4 target classes.
+4. **Loss Function:** Optimized explicitly with **Categorical Focal Loss (alpha=0.25, gamma=2.0)** to heavily penalize majority class bias and mathematically force the network to prioritize minority classes.
 
 ---
 
@@ -62,9 +62,12 @@ During the development of this pipeline, several massive architectural and data 
 3. **YAMNet Transfer Learning (TensorFlow Hub):**
    - **Result:** 61% Accuracy. `tired` recall collapsed back to 0.00.
    - **Finding:** Google's massive YAMNet model was tested as a feature extractor. While overall accuracy slightly increased, its generalized human-sound features failed to identify the narrow frequency bands of a "tired" baby.
-4. **The "Goldilocks" Custom CNN (Best Model):**
+6. **The "Goldilocks" Custom CNN (Baseline Model):**
    - **Result:** 60.0% Accuracy, Macro F1 of 0.50, `tired` recall restored to 0.59.
    - **Finding:** Reverting to the custom 5x5 CNN, dropping `TARGET_COUNT` in `augment.py` to 300 (to lightly balance classes without creating synthetic bias), and wrapping audio successfully trained a robust model that learns minority classes fairly.
+7. **Final Refactor: Focal Loss + CNN+LSTM:**
+   - **Result:** 56% Accuracy, `diaper` recall surged to 0.62.
+   - **Finding:** By stripping out Self-Attention and compiling the model natively with `Categorical Focal Loss`, the model perfectly executed its mathematical directive. It sacrificed a few percentage points of raw majority-class accuracy to heavily prioritize the minority classes, yielding the fairest, most balanced feature extractor yet.
 
 ---
 
@@ -83,8 +86,8 @@ python dataset.py
 ```bash
 python augment.py
 ```
-- Performs offline augmentation strictly on the training split to resolve class imbalances (~1500 samples per class).
-- Utilizes `TimeStretch`, `PitchShift`, `TimeMask`, and `AddBackgroundNoise` (if ESC-50 is provided).
+- Performs offline augmentation strictly on the training split to resolve class imbalances (~600 samples per class).
+- Utilizes `TimeStretch`, `PitchShift`, `TimeMask`, and `AddBackgroundNoise` (safely injected using the ESC-50 dataset).
 
 ### Stage 3: Feature Extraction
 ```bash

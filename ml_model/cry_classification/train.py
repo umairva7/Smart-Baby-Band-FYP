@@ -84,14 +84,7 @@ def main():
         break
         
     model = build_model(input_shape=input_shape, num_classes=len(TARGET_CLASSES))
-    
-    # Force compiling with Adam and a sane learning rate
-    model.compile(
-        optimizer=Adam(learning_rate=0.001),
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    
+    # model.py already compiles the model with the custom SparseCategoricalFocalLoss
     callbacks = [
         tf.keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
         tf.keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=5, min_lr=1e-6),

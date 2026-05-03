@@ -8,10 +8,10 @@ from audiomentations import Compose, TimeStretch, PitchShift, AddBackgroundNoise
 
 # Constants
 SR = 16000
-TARGET_COUNT = 300
+TARGET_COUNT = 600
 PROCESSED_DIR = "data/processed/"
 AUGMENTED_DIR = "data/augmented/"
-ESC50_DIR = "data/raw/esc50/"
+ESC50_DIR = "/home/umairimran/OLD DISK/Smart Baby Band FYP/ml_model/cry_detection/data/ESC-50-master/audio"
 
 # Hardcoded to prevent dirty CSVs from ruining your dataset again
 TARGET_CLASSES = ["hungry", "tired", "discomfort", "diaper"]
