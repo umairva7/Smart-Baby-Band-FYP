@@ -6,7 +6,6 @@ import pandas as pd
 import soundfile as sf
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from pathlib import Path
 
 # Constants
 SR = 16000
@@ -14,8 +13,8 @@ DURATION = 3.0
 SAMPLES = int(SR * DURATION)
 TOP_DB = 20
 
-# 6 Harmonized classes
-TARGET_CLASSES = ["hungry", "tired", "discomfort", "belly_pain", "diaper", "burping"]
+# 4 Harmonized classes (belly_pain and burping explicitly dropped)
+TARGET_CLASSES = ["hungry", "tired", "discomfort", "diaper"]
 
 def get_dac_files(base_dir):
     records = []
@@ -39,7 +38,6 @@ def get_baby_crying_files(base_dir):
         print(f"Warning: baby_crying dir {base_dir} not found.")
         return records
     
-    # Check train and test splits inside baby-crying
     for split in ["train", "test", "raw"]:
         split_dir = os.path.join(base_dir, split)
         if not os.path.exists(split_dir):
@@ -49,7 +47,6 @@ def get_baby_crying_files(base_dir):
             if not os.path.isdir(label_dir):
                 continue
                 
-            # Map labels
             mapped_label = None
             if label == "hungry":
                 mapped_label = "hungry"
@@ -59,10 +56,10 @@ def get_baby_crying_files(base_dir):
                 mapped_label = "discomfort"
             elif label == "diaper":
                 mapped_label = "diaper"
-            elif label in ["hug", "awake"]:
-                continue # drop
+            elif label in ["hug", "awake", "belly_pain", "burping"]:
+                continue 
             
-            if mapped_label:
+            if mapped_label and mapped_label in TARGET_CLASSES:
                 for f in glob.glob(os.path.join(label_dir, "*.wav")):
                     records.append({
                         "filepath": f,
@@ -72,19 +69,19 @@ def get_baby_crying_files(base_dir):
     return records
 
 def process_audio(filepath):
-    # Load and resample
     y, sr = librosa.load(filepath, sr=SR, mono=True)
-    
-    # Trim silence
     y_trimmed, _ = librosa.effects.trim(y, top_db=TOP_DB)
     
-    # Pad or truncate to fixed length
-    if len(y_trimmed) > SAMPLES:
+    if len(y_trimmed) == 0:
+        y_trimmed = np.zeros(SAMPLES)
+        
+    if len(y_trimmed) >= SAMPLES:
         y_final = y_trimmed[:SAMPLES]
     else:
-        y_final = np.pad(y_trimmed, (0, max(0, SAMPLES - len(y_trimmed))), "constant")
+        # Repeat the audio to fill the 3 seconds instead of padding with silence
+        repeats = int(np.ceil(SAMPLES / len(y_trimmed)))
+        y_final = np.tile(y_trimmed, repeats)[:SAMPLES]
         
-    # Normalize amplitude to [-1, 1]
     if np.max(np.abs(y_final)) > 0:
         y_final = y_final / np.max(np.abs(y_final))
         
@@ -118,9 +115,8 @@ def main():
             
     df_processed = pd.DataFrame(processed_records)
     
-    # Stratified 80/10/10 split
     train_val, test = train_test_split(df_processed, test_size=0.1, stratify=df_processed["label"], random_state=42)
-    train, val = train_test_split(train_val, test_size=1/9, stratify=train_val["label"], random_state=42) # 10% of total is 1/9 of 90%
+    train, val = train_test_split(train_val, test_size=1/9, stratify=train_val["label"], random_state=42) 
     
     train["split"] = "train"
     val["split"] = "val"
@@ -129,7 +125,6 @@ def main():
     splits_df = pd.concat([train, val, test])
     splits_df.to_csv(os.path.join(processed_dir, "splits.csv"), index=False)
     
-    # Plot class distribution
     plt.figure(figsize=(10, 6))
     splits_df["label"].value_counts().plot(kind="bar")
     plt.title("Class Distribution")

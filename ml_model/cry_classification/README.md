@@ -10,6 +10,8 @@ The pipeline harmonizes two major datasets (`donateacry` and `baby_crying`), ext
 
 ## 1. Data Layout
 
+*Note: The pipeline was optimized down to 4 target classes (`hungry`, `tired`, `discomfort`, `diaper`) to maximize performance on limited data.*
+
 To use the pipeline, place the raw datasets in the `data/raw/` folder as follows:
 
 ```text
@@ -30,22 +32,39 @@ smart_baby_band/
 ## 2. Model Architecture
 
 The deep learning model is built sequentially to process audio as spatial-temporal data:
-1. **CNN Local Blocks (4x):** Extracts local spatial-frequency features using 5x5 Conv2D layers with stride/pooling, Batch Normalization, ReLU, and Dropout.
-2. **Multi-Head Attention (2x):** Focuses on globally significant features across the frequency and time domains.
-3. **Stacked LSTM (4x):** Learns temporal dependencies and sequence structures of the crying audio over time.
-4. **Classifier:** Dense layer with Softmax activation outputting probabilities for the 6 target classes.
+1. **CNN Local Blocks (4x):** Extracts local spatial-frequency features using 5x5 Conv2D layers with stride/pooling, Batch Normalization, ReLU, and Dropout(0.3).
+2. **Multi-Head Attention:** Focuses on globally significant features across the frequency and time domains.
+3. **Stacked LSTM (2x):** Learns temporal dependencies and sequence structures over time.
+4. **Classifier:** Dense layer with Softmax activation outputting probabilities for the 4 target classes.
 
 ---
 
-## 3. Feature Extraction (Efficient Graph)
+## 3. Feature Extraction
 
-For computational efficiency, audio files are pre-processed offline into an "Efficient Graph" representation:
-- **Resampling:** 16kHz mono WAV, fixed to 3.0 seconds padding/truncation.
-- **Components:**
-  - High-frequency bins from a standard **STFT Spectrogram** (N_FFT=512)
-  - Full **Mel Spectrogram** (128 bands)
-  - **MFCCs** + Delta + Delta-Delta (40 components each)
-- **Final Shape:** Concatenated along the frequency axis to yield a `(305, 128, 1)` tensor shape per 3-second sample.
+For computational efficiency and noise reduction, audio files are pre-processed offline:
+- **Resampling:** 16kHz mono WAV.
+- **Duration:** 3.0 seconds (audio is wrapped using `np.tile` if too short, replacing dead zero-padding).
+- **Component:** **Mel Spectrogram** (128 bands, N_FFT=512, Min-Max normalized).
+- **Final Shape:** A clean `(128, 128, 1)` tensor shape per 3-second sample.
+
+---
+
+## 4. Experimental History & Findings
+
+During the development of this pipeline, several massive architectural and data experiments were performed to break past the theoretical 60% accuracy ceiling on small datasets:
+
+1. **Extreme Augmentation (1500 target):** 
+   - **Result:** ~55% Accuracy. `tired` recall collapsed to 0.00.
+   - **Finding:** Over-augmenting minority classes with `TimeStretch` and `PitchShift` generated too many synthetic clones (3.7x the natural data), causing the CNN to overfit on artifacts instead of natural acoustic sounds.
+2. **Dynamic SpecAugment & Z-Score Normalization:**
+   - **Result:** ~50% Accuracy. Mode collapse (predicted `hungry` for everything).
+   - **Finding:** Masking out frequency/time bands randomly during `tf.data` loading was too destructive for the `128x128` Mel Spectrograms. Combined with Z-Score normalization, it destroyed the fragile minority class signals.
+3. **YAMNet Transfer Learning (TensorFlow Hub):**
+   - **Result:** 61% Accuracy. `tired` recall collapsed back to 0.00.
+   - **Finding:** Google's massive YAMNet model was tested as a feature extractor. While overall accuracy slightly increased, its generalized human-sound features failed to identify the narrow frequency bands of a "tired" baby.
+4. **The "Goldilocks" Custom CNN (Best Model):**
+   - **Result:** 60.0% Accuracy, Macro F1 of 0.50, `tired` recall restored to 0.59.
+   - **Finding:** Reverting to the custom 5x5 CNN, dropping `TARGET_COUNT` in `augment.py` to 300 (to lightly balance classes without creating synthetic bias), and wrapping audio successfully trained a robust model that learns minority classes fairly.
 
 ---
 

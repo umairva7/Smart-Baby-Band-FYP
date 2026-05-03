@@ -21,13 +21,16 @@ def evaluate_model(model, ds, y_true, title_suffix=""):
     y_pred_probs = model.predict(ds)
     y_pred = np.argmax(y_pred_probs, axis=1)
     
+    # Explicitly provide labels to avoid errors when some classes are missing in cross-dataset testing
+    labels = list(range(len(TARGET_CLASSES)))
+    
     # classification report
-    report = classification_report(y_true, y_pred, target_names=TARGET_CLASSES, output_dict=True, zero_division=0)
+    report = classification_report(y_true, y_pred, labels=labels, target_names=TARGET_CLASSES, output_dict=True, zero_division=0)
     print("Classification Report:")
-    print(classification_report(y_true, y_pred, target_names=TARGET_CLASSES, zero_division=0))
+    print(classification_report(y_true, y_pred, labels=labels, target_names=TARGET_CLASSES, zero_division=0))
     
     # confusion matrix
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', xticklabels=TARGET_CLASSES, yticklabels=TARGET_CLASSES, cmap='Blues')
     plt.title(f"Confusion Matrix {title_suffix}")
@@ -141,7 +144,7 @@ def main():
     parser.add_argument("--skip-cross-dataset", action="store_true", help="Skip the cross dataset experiment")
     args = parser.parse_args()
     
-    model_path = os.path.join(MODELS_DIR, "best_model.h5")
+    model_path = os.path.join(MODELS_DIR, "best_model.keras")
     if not os.path.exists(model_path):
         print(f"Error: {model_path} not found.")
         return

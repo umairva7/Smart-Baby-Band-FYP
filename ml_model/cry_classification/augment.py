@@ -8,17 +8,20 @@ from audiomentations import Compose, TimeStretch, PitchShift, AddBackgroundNoise
 
 # Constants
 SR = 16000
-TARGET_COUNT = 1500
+TARGET_COUNT = 300
 PROCESSED_DIR = "data/processed/"
 AUGMENTED_DIR = "data/augmented/"
 ESC50_DIR = "data/raw/esc50/"
+
+# Hardcoded to prevent dirty CSVs from ruining your dataset again
+TARGET_CLASSES = ["hungry", "tired", "discomfort", "diaper"]
 
 def get_augmenter():
     # Only add background noise if ESC-50 exists
     transforms = [
         TimeStretch(min_rate=0.85, max_rate=1.15, p=0.5),
         PitchShift(min_semitones=-2, max_semitones=2, p=0.5),
-        TimeMask(min_band_part=0.05, max_band_part=0.15, fade=False, p=0.5)
+        TimeMask(min_band_part=0.05, max_band_part=0.15, fade_duration=0.0, p=0.5)
     ]
     if os.path.exists(ESC50_DIR) and len(os.listdir(ESC50_DIR)) > 0:
         transforms.insert(2, AddBackgroundNoise(sounds_path=ESC50_DIR, min_snr_db=10, max_snr_db=20, p=0.5))
@@ -35,10 +38,12 @@ def main():
         return
         
     df = pd.read_csv(splits_path)
-    train_df = df[df["split"] == "train"]
+    
+    # Filter for training split AND strictly enforce the 4 target classes
+    train_df = df[(df["split"] == "train") & (df["label"].isin(TARGET_CLASSES))]
     
     class_counts = train_df["label"].value_counts()
-    print("Original Train Class Counts:\n", class_counts)
+    print("Filtered Train Class Counts:\n", class_counts)
     
     augmenter = get_augmenter()
     augmented_records = []
