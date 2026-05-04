@@ -41,7 +41,7 @@ async def get_cry_history(
     baby_id: str,
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    cry_type: Optional[str] = Query(None, description="Filter by: hunger, pain, discomfort, tired"),
+    cry_type: Optional[str] = Query(None, description="Filter by: hungry, tired, discomfort, diaper, unknown"),
     limit: int = Query(50, ge=1, le=200),
     current_user: dict = Depends(get_current_user),
 ):

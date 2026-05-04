@@ -15,7 +15,7 @@ from app.schemas.cry_event import CryClassifyRequest, CryClassifyResponse
 from app.config import get_settings
 
 # Cry type labels — must match your training labels
-CRY_LABELS = ["hunger", "pain", "discomfort", "tired", "normal"]
+CRY_LABELS = ["hungry", "tired", "discomfort", "diaper"]
 
 
 class CryService:
@@ -30,39 +30,49 @@ class CryService:
         """
         Lazy-load the TFLite model.
         Called only when classify_cry() is first used.
-
-        TODO: Implement in Phase 4 — load the .tflite model from ml_models/
         """
         if self._model is not None:
             return
 
         settings = get_settings()
-        # TODO: Load TFLite model
-        # import tensorflow as tf
-        # self._model = tf.lite.Interpreter(model_path=settings.CRY_MODEL_PATH)
-        # self._model.allocate_tensors()
-        print(f"⚠️  ML Model not loaded yet. Path: {settings.CRY_MODEL_PATH}")
+        import tensorflow as tf
+        print(f"Loading ML Model from: {settings.CRY_MODEL_PATH}")
+        self._model = tf.lite.Interpreter(model_path=settings.CRY_MODEL_PATH)
+        self._model.allocate_tensors()
+        
+        self.input_details = self._model.get_input_details()
+        self.output_details = self._model.get_output_details()
 
     async def classify_cry(self, request: CryClassifyRequest) -> CryClassifyResponse:
         """
         Run ML inference on MFCC audio features.
-
-        TODO (Phase 4): Replace this stub with actual TFLite inference.
         """
         self._load_model()
+        import numpy as np
 
-        # ── STUB: Return dummy prediction until model is integrated ──
-        # In Phase 4, this will:
-        # 1. Reshape the input features
-        # 2. Run the TFLite interpreter
-        # 3. Get output probabilities
-        # 4. Return the top prediction
+        # Convert to numpy array
+        input_data = np.array(request.audio_features, dtype=np.float32)
 
-        predictions = {label: 0.0 for label in CRY_LABELS}
-        predictions["hunger"] = 0.85  # Dummy response
+        # Reshape to expected input shape
+        expected_shape = self.input_details[0]['shape']
+        input_data = input_data.reshape(expected_shape)
 
+        # Run inference
+        self._model.set_tensor(self.input_details[0]['index'], input_data)
+        self._model.invoke()
+
+        # Get output
+        output_data = self._model.get_tensor(self.output_details[0]['index'])[0]
+
+        # Map predictions to labels
+        predictions = {label: float(prob) for label, prob in zip(CRY_LABELS, output_data)}
+        
         cry_type = max(predictions, key=predictions.get)
         confidence = predictions[cry_type]
+
+        # If confidence is lower than 72%, classify as "unknown"
+        if confidence < 0.72:
+            cry_type = "unknown"
 
         # Store the event in Firestore
         event_data = {

@@ -22,7 +22,7 @@ class CryClassifyRequest(BaseModel):
 class CryEventCreate(BaseModel):
     """Schema for manually creating a cry event (e.g., from Lambda)."""
     baby_id: str
-    cry_type: str = Field(..., pattern="^(hunger|pain|discomfort|tired|normal)$")
+    cry_type: str = Field(..., pattern="^(hungry|tired|discomfort|diaper|unknown)$")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     duration_seconds: Optional[int] = None
 
