@@ -31,8 +31,8 @@ class SparseCategoricalFocalLoss(tf.keras.losses.Loss):
         
         return tf.reduce_sum(focal_loss, axis=-1)
 
-def build_model(input_shape=(128, 128, 1), num_classes=4):
-    inputs = Input(shape=input_shape)
+def build_model(input_shape=(128, 128, 1), num_classes=4, batch_size=None):
+    inputs = Input(shape=input_shape, batch_size=batch_size)
     x = inputs
     
     # --- 1. CNN Base ---
