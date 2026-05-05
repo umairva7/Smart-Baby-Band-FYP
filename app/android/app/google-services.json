@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "914653408170",
-    "project_id": "baby-test-1",
-    "storage_bucket": "baby-test-1.firebasestorage.app"
+    "project_number": "634554212692",
+    "firebase_url": "https://smart-baby-band-default-rtdb.firebaseio.com",
+    "project_id": "smart-baby-band",
+    "storage_bucket": "smart-baby-band.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:914653408170:android:63666f96aa9e30086f99d3",
+        "mobilesdk_app_id": "1:634554212692:android:1d1616bb276353ab08e8c1",
         "android_client_info": {
           "package_name": "com.example.babytest1"
         }
@@ -15,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBTy5GZ0PouuQGISkKDNREX5mscBW92-NU"
+          "current_key": "AIzaSyDmNHLfO5Me8BG7dwy-Am1gq4dMmbOfpHQ"
         }
       ],
       "services": {

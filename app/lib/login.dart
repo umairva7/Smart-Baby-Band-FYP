@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dash.dart';
+import 'services/fcm_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -23,6 +24,9 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => isLoading = true);
 
     await Future.delayed(const Duration(seconds: 1)); // fake loading
+
+    // Initialize FCM — requests permission, saves token to Firestore
+    await FcmService.initialize();
 
     setState(() => isLoading = false);
 

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
 import 'theme_provider.dart';
 import 'login.dart';
@@ -11,7 +14,23 @@ import 'settings.dart';
 /// Screens can access it via [MyApp.themeProvider].
 final ThemeProvider _themeProvider = ThemeProvider();
 
-void main() {
+/// This handler runs when the app is fully terminated and a push notification arrives.
+/// It MUST be a top-level function (not inside a class).
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  debugPrint('FCM: Background message received — ${message.messageId}');
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // Register the background message handler
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  
   runApp(const MyApp());
 }
 

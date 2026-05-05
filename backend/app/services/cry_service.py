@@ -13,6 +13,7 @@ from typing import Optional, List
 from app.firebase_client import get_firestore_client
 from app.schemas.cry_event import CryClassifyRequest, CryClassifyResponse
 from app.config import get_settings
+from app.services.notification_service import NotificationService
 
 # Cry type labels — must match your training labels
 CRY_LABELS = ["hungry", "tired", "discomfort", "diaper"]
@@ -83,6 +84,40 @@ class CryService:
             "timestamp": datetime.utcnow(),
         }
         self.db.collection(self.collection).add(event_data)
+
+        # Trigger Real-Time Notification
+        try:
+            # 1. Fetch the baby profile to find the parent's user_id
+            baby_doc = self.db.collection("babies").document(request.baby_id).get()
+            if baby_doc.exists:
+                user_id = baby_doc.to_dict().get("user_id")
+                
+                if user_id:
+                    # 2. Determine the notification message
+                    title = "Baby Cry Alert 🍼"
+                    if cry_type == "hungry":
+                        message = "Your baby might be hungry."
+                    elif cry_type == "tired":
+                        message = "Your baby seems tired and needs sleep."
+                    elif cry_type == "discomfort":
+                        message = "Your baby is experiencing discomfort."
+                    elif cry_type == "diaper":
+                        message = "Your baby might need a diaper change."
+                    else:
+                        message = "Your baby is crying! (Unknown reason)"
+                        
+                    # 3. Call the notification service
+                    notif_service = NotificationService()
+                    # We only await this because we want to trigger the push notification
+                    await notif_service.create_notification(
+                        user_id=user_id,
+                        baby_id=request.baby_id,
+                        title=title,
+                        message=message,
+                        notif_type="cry_alert"
+                    )
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
 
         return CryClassifyResponse(
             cry_type=cry_type,
