@@ -15,6 +15,23 @@ from app.schemas.cry_event import CryClassifyRequest, CryClassifyResponse
 from app.config import get_settings
 from app.services.notification_service import NotificationService
 
+import os
+import sys
+import tempfile
+import numpy as np
+import soundfile as sf
+from firebase_admin import db
+
+# Ensure features.py is accessible
+ML_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ml_model/cry_classification"))
+if ML_MODEL_DIR not in sys.path:
+    sys.path.append(ML_MODEL_DIR)
+try:
+    from features import extract_features
+except ImportError:
+    print("Warning: Could not import features.py from ml_model")
+    extract_features = None
+
 # Cry type labels — must match your training labels
 CRY_LABELS = ["hungry", "tired", "discomfort", "diaper"]
 
@@ -43,6 +60,80 @@ class CryService:
         
         self.input_details = self._model.get_input_details()
         self.output_details = self._model.get_output_details()
+
+    def _load_keras_model(self):
+        """Lazy-load the Keras classification model."""
+        if hasattr(self, '_keras_model') and self._keras_model is not None:
+            return
+
+        settings = get_settings()
+        import tensorflow as tf
+        print(f"Loading Keras Model from: {settings.KERAS_MODEL_PATH}")
+        try:
+            self._keras_model = tf.keras.models.load_model(settings.KERAS_MODEL_PATH, compile=False)
+        except Exception as e:
+            print(f"Failed to load Keras model: {e}")
+            self._keras_model = None
+
+    async def predict_audio(self, audio_bytes: bytes, device_id: str = "babyband_01") -> dict:
+        """
+        New prediction pipeline:
+        1. Receive raw audio bytes (16-bit PCM float32/int16)
+        2. Convert to wav in memory
+        3. Extract features using features.py
+        4. Run Keras model inference
+        5. Push to Firebase RTDB
+        """
+        self._load_keras_model()
+        if not hasattr(self, '_keras_model') or not self._keras_model:
+            raise Exception("Keras model not loaded.")
+
+        if not extract_features:
+            raise Exception("features.py could not be loaded. Check path.")
+
+        # Parse raw audio (Assuming 16-bit PCM)
+        try:
+            audio_data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        except Exception as e:
+            raise Exception(f"Failed to parse audio bytes: {e}")
+
+        # Extract features using temporary wav file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            sf.write(tmp.name, audio_data, 16000)
+            tmp.close()
+            try:
+                spectrogram = extract_features(tmp.name)
+            finally:
+                os.remove(tmp.name)
+
+        # Run Inference -> Add batch dimension (1, 128, 128, 1)
+        input_batch = np.expand_dims(spectrogram, axis=0)
+        predictions = self._keras_model.predict(input_batch)[0]
+        
+        pred_dict = {label: float(prob) for label, prob in zip(CRY_LABELS, predictions)}
+        cry_type = max(pred_dict, key=pred_dict.get)
+        confidence = pred_dict[cry_type]
+
+        if confidence < 0.60:
+            cry_type = "unknown"
+
+        # Push to RTDB
+        payload = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "device_id": device_id,
+            "cry_label": cry_type,
+            "confidence": confidence,
+            "all_predictions": pred_dict
+        }
+        
+        try:
+            ref = db.reference("cry_classifications")
+            ref.push(payload)
+            print("✅ Successfully pushed prediction to Firebase RTDB")
+        except Exception as e:
+            print(f"Failed to push to RTDB: {e}")
+
+        return payload
 
     async def classify_cry(self, request: CryClassifyRequest) -> CryClassifyResponse:
         """

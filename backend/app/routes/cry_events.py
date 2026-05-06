@@ -3,7 +3,7 @@ Cry Events Routes
 Endpoints for cry classification (ML inference) and cry event history.
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from typing import Optional
 from datetime import datetime
 from app.middleware.firebase_auth import get_current_user
@@ -34,6 +34,25 @@ async def classify_cry(
     service = CryService()
     result = await service.classify_cry(request)
     return result
+
+
+@router.post("/predict")
+async def predict_cry_audio(
+    file: UploadFile = File(...),
+):
+    """
+    New endpoint for Phase 2:
+    Receives raw audio bytes from ESP32, extracts features, 
+    runs the Keras model inference, and pushes to Firebase RTDB.
+    """
+    audio_bytes = await file.read()
+    service = CryService()
+    
+    try:
+        result = await service.predict_audio(audio_bytes)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/history/{baby_id}", response_model=CryHistoryResponse)

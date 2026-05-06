@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # ── Firebase ──────────────────────────────────────────────
     # Path to your Firebase service account JSON key file
     FIREBASE_SERVICE_ACCOUNT_PATH: str = "firebase-service-account.json"
+    FIREBASE_RTDB_URL: str = "https://smart-baby-band-default-rtdb.firebaseio.com"
 
     # ── CORS (Cross-Origin Resource Sharing) ──────────────────
     # Which domains are allowed to call your API
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
 
     # ── ML Model ──────────────────────────────────────────────
     CRY_MODEL_PATH: str = "ml_models/cry_detection_model.tflite"
+    KERAS_MODEL_PATH: str = "../ml_model/cry_classification/models/best_model.keras"
 
     class Config:
         env_file = ".env"

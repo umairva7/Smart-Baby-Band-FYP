@@ -33,7 +33,9 @@ def initialize_firebase() -> None:
     # Only initialize if not already done (prevents errors on hot reload)
     if not firebase_admin._apps:
         cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': settings.FIREBASE_RTDB_URL
+        })
         print("✅ Firebase Admin SDK initialized successfully")
 
 
