@@ -1,10 +1,11 @@
 # Environment variables
 .env
 
-# Firebase credentials (NEVER commit this!)
+# Firebase and MQTT credentials (NEVER commit these!)
 firebase-service-account.json
 *.json
 !package.json
+certs/
 
 # Python
 __pycache__/

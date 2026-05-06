@@ -18,6 +18,10 @@ from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.firebase_client import initialize_firebase
+from app.mqtt_client import start_mqtt_client, stop_mqtt_client
+
+# Global variable to hold the MQTT client
+_mqtt_client = None
 
 # Import route modules
 from app.routes import (
@@ -39,15 +43,18 @@ async def lifespan(app: FastAPI):
     - Startup: Initialize Firebase, load ML models, etc.
     - Shutdown: Clean up resources
     """
+    global _mqtt_client
     # ── STARTUP ──
     print("🚀 Starting Smart Baby Band API...")
     initialize_firebase()
+    _mqtt_client = start_mqtt_client()
     print("✅ All systems ready!")
 
     yield  # App runs here
 
     # ── SHUTDOWN ──
     print("👋 Shutting down Smart Baby Band API...")
+    stop_mqtt_client(_mqtt_client)
 
 
 # ── Create FastAPI App ────────────────────────────────────────
