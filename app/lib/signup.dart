@@ -147,7 +147,7 @@ class _SignupPageState extends State<SignupPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Profile Image Picker
+
                   GestureDetector(
                     onTap: _pickImage,
                     child: Stack(
