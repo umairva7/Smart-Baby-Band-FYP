@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
@@ -52,7 +53,9 @@ class MyApp extends StatelessWidget {
           themeMode: _themeProvider.themeMode,
           theme: AppTheme.light,
           darkTheme: AppTheme.dark,
-          initialRoute: '/login',
+          home: FirebaseAuth.instance.currentUser != null 
+              ? const DashboardPage() 
+              : const LoginPage(),
           routes: {
             '/login': (context) => const LoginPage(),
             '/dashboard': (context) => const DashboardPage(),
