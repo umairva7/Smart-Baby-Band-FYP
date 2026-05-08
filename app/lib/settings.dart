@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'core/theme/app_colors.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 import 'navigation.dart';
+import 'login.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -623,15 +626,42 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                // Add your logout logic here
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Logged out successfully'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+              onPressed: () async {
+                Navigator.of(context).pop(); // close the dialog
+                
+                try {
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user != null) {
+                    // 1. Delete the FCM token so this device stops receiving push notifications
+                    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+                      'fcm_token': FieldValue.delete(),
+                    });
+                    
+                    // 2. Sign out of Firebase
+                    await FirebaseAuth.instance.signOut();
+                  }
+                  
+                  if (context.mounted) {
+                    // 3. Navigate back to the Login Page and clear navigation history
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (context) => const LoginPage()),
+                      (Route<dynamic> route) => false,
+                    );
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Logged out successfully'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error logging out: $e')),
+                    );
+                  }
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dash.dart';
+import 'signup.dart';
 import 'services/fcm_service.dart';
 
 class LoginPage extends StatefulWidget {
@@ -17,24 +19,48 @@ class _LoginPageState extends State<LoginPage> {
   bool isLoading = false;
   bool _obscurePassword = true;
 
-  // TEMP login method (no Firebase)
+  // Real Firebase Login
   Future<void> loginUser() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => isLoading = true);
 
-    await Future.delayed(const Duration(seconds: 1)); // fake loading
+    try {
+      // 1. Sign in with Firebase Auth
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailController.text.trim(),
+        password: passwordController.text,
+      );
 
-    // Initialize FCM — requests permission, saves token to Firestore
-    await FcmService.initialize();
+      if (credential.user != null) {
+        // 2. Initialize FCM — requests permission, saves token to Firestore
+        await FcmService.initialize();
 
-    setState(() => isLoading = false);
-
-    // Directly navigate to dashboard
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const DashboardPage()),
-    );
+        if (mounted) {
+          // 3. Navigate to dashboard
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const DashboardPage()),
+          );
+        }
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Login failed')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('An error occurred: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+    }
   }
 
   @override
@@ -184,6 +210,30 @@ class _LoginPageState extends State<LoginPage> {
                             onPressed: loginUser,
                             child: const Text('LOG IN'),
                           ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Sign up row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Don\'t have an account?',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const SignupPage()),
+                          );
+                        },
+                        child: const Text('Sign Up'),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: 24),
