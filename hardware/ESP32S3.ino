@@ -18,6 +18,7 @@
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "model_data.h"
+#include "mfcc_norm_stats.h"
 
 // =========================
 // WIFI / AWS IOT
@@ -127,7 +128,7 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 #define AUDIO_BUFFER_SIZE 8000
 #define FRAME_LENGTH      400
 #define FRAME_STEP        160
-#define MFCC_FEATURES     39
+#define MFCC_FEATURES     26
 #define MFCC_FRAMES       128
 #define MEL_FILTERS       26
 #define FFT_SIZE          512
@@ -137,7 +138,7 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 // THRESHOLDS / INTERVALS
 // =========================
 #define ENERGY_THRESHOLD  0.10f
-#define CRY_THRESHOLD     0.85f
+#define CRY_THRESHOLD     0.40f
 
 const unsigned long MOTION_INTERVAL = 200;
 const unsigned long ENV_INTERVAL    = 2000;
@@ -220,6 +221,7 @@ unsigned long lastCryCheck = 0;
 unsigned long lastStatusPublish = 0;
 unsigned long lastCryEventSent = 0;
 bool previousCryDetected = false;
+int consecutive_cries = 0;
 
 // =========================
 // MOTION BASELINE
@@ -704,7 +706,9 @@ void runCryDetection() {
 
   for (int i = 0; i < MFCC_FRAMES; i++) {
     for (int j = 0; j < MFCC_FEATURES; j++) {
-      input->data.f[idx++] = mfccMatrix[i * MFCC_FEATURES + j];
+      float raw_val = mfccMatrix[i * MFCC_FEATURES + j];
+      float normalized = (raw_val - MFCC_MEAN[j]) / MFCC_STD[j];
+      input->data.f[idx++] = normalized;
     }
   }
 
@@ -717,7 +721,14 @@ void runCryDetection() {
   }
 
   float result = output->data.f[0];
-  bool currentCry = (result > CRY_THRESHOLD && energy > ENERGY_THRESHOLD);
+  
+  if (result >= CRY_THRESHOLD && energy > ENERGY_THRESHOLD) {
+    consecutive_cries++;
+  } else {
+    consecutive_cries = 0;
+  }
+  
+  bool currentCry = (consecutive_cries >= 3);
 
   dataPacket.cryConfidence = result;
   dataPacket.cryDetected = currentCry;

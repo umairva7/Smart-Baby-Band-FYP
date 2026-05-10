@@ -1,6 +1,6 @@
 import sys
 
-model_path = "cnn_model.tflite"
+model_path = "../ml_model/cry_detection/models/cry_detection/cnn_model_fixed.tflite"
 output_path = "model_data.h"
 
 with open(model_path, "rb") as f:
