@@ -3,7 +3,7 @@ Cry Events Routes
 Endpoints for cry classification (ML inference) and cry event history.
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from typing import Optional
 from datetime import datetime
 from app.middleware.firebase_auth import get_current_user
@@ -16,6 +16,9 @@ from app.schemas.cry_event import (
 from app.services.cry_service import CryService
 
 router = APIRouter()
+
+# Expected payload: 48000 int16 samples × 2 bytes each = 96000 bytes
+EXPECTED_PCM_BYTES = 48000 * 2
 
 
 @router.post("/classify", response_model=CryClassifyResponse)
@@ -37,17 +40,38 @@ async def classify_cry(
 
 
 @router.post("/predict")
-async def predict_cry_audio(
-    file: UploadFile = File(...),
-):
+async def predict_cry_audio(request: Request):
     """
-    New endpoint for Phase 2:
-    Receives raw audio bytes from ESP32, extracts features, 
-    runs the Keras model inference, and pushes to Firebase RTDB.
+    Receives raw int16 PCM audio bytes from the ESP32 via
+    Content-Type: application/octet-stream, extracts Mel Spectrogram
+    features, runs the Keras classification model, and pushes results
+    to Firebase RTDB.
+
+    Expected payload: 96000 bytes (48000 int16 samples at 16kHz = 3 seconds).
     """
-    audio_bytes = await file.read()
+    # --- Validate content type ---
+    content_type = request.headers.get("content-type", "")
+    if "octet-stream" not in content_type:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Expected Content-Type: application/octet-stream, got: {content_type}"
+        )
+
+    # --- Read raw body ---
+    audio_bytes = await request.body()
+
+    if len(audio_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+
+    if len(audio_bytes) != EXPECTED_PCM_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected {EXPECTED_PCM_BYTES} bytes (48000 int16 samples), "
+                   f"got {len(audio_bytes)} bytes"
+        )
+
     service = CryService()
-    
+
     try:
         result = await service.predict_audio(audio_bytes)
         return {"status": "success", "data": result}

@@ -120,10 +120,14 @@ def extract_mfcc_esp32_matched(audio_path, target_frames=FRAMES_PER_SAMPLE):
         # S shape: (FFT_SIZE/2 + 1, frames) = (257, frames)
 
         # --- Step 2: Mel filterbank applied to MAGNITUDE ---
+        # CRITICAL: norm=None to match ESP32's raw triangular filters.
+        # librosa defaults to norm='slaney' which divides each filter by its
+        # bandwidth — the ESP32 does NOT do this, so we must disable it.
         mel_basis = librosa.filters.mel(
             sr=SAMPLING_RATE,
             n_fft=N_FFT,
             n_mels=N_MELS,
+            norm=None,        # <-- ESP32 uses raw triangular filters
         )
         # mel_basis shape: (26, 257)
         mel_spec = mel_basis @ S  # (26, frames)
@@ -131,11 +135,18 @@ def extract_mfcc_esp32_matched(audio_path, target_frames=FRAMES_PER_SAMPLE):
         # --- Step 3: Natural log (matches ESP32's logf()) ---
         log_mel = np.log(mel_spec + 1e-6)  # (26, frames)
 
-        # --- Step 4: Raw DCT-II (NO ortho normalization) ---
-        # ESP32 code: val += melE[m] * cosf((PI * c * (m + 0.5f)) / MEL_FILTERS)
-        # scipy's DCT-II (norm=None) includes a factor of 2, but this constant
-        # factor is fully absorbed by Z-score normalization (mean & std scale equally)
-        mfcc = scipy_dct(log_mel, type=2, n=N_MFCC, axis=0, norm=None)
+        # --- Step 4: Manual DCT matching ESP32 EXACTLY ---
+        # ESP32 code:
+        #   for c: for m: val += melE[m] * cosf((PI * c * (m + 0.5f)) / MEL_FILTERS)
+        #
+        # scipy_dct(norm=None) includes a factor of 2 that the ESP32 does NOT have.
+        # This is NOT absorbed by normalization — it shifts MFCC_MEAN by 2x.
+        # So we implement the DCT manually to produce identical values.
+        n_frames = log_mel.shape[1]
+        mfcc = np.zeros((N_MFCC, n_frames), dtype=np.float32)
+        for c in range(N_MFCC):
+            for m in range(N_MELS):
+                mfcc[c] += log_mel[m] * np.cos(np.pi * c * (m + 0.5) / N_MELS)
         # mfcc shape: (26, frames)
 
         # Transpose to (frames, 26) 

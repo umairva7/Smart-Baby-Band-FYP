@@ -4,22 +4,17 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <HTTPClient.h>
 #include "driver/i2s.h"
 #include "esp_heap_caps.h"
-#include <arduinoFFT.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <MAX30105.h>
 #include <heartRate.h>
-
-// TFLite
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "model_data.h"
-#include "mfcc_norm_stats.h"
 
 // =========================
 // WIFI / AWS IOT
@@ -31,6 +26,10 @@ const char* mqtt_server = "a36ya5skrm71sd-ats.iot.ap-southeast-2.amazonaws.com";
 const int mqtt_port = 8883;
 const char* mqtt_client_id = "babyband_01";
 const char* mqtt_topic = "babyband/01/data";
+const char* audio_post_url = "http://10.9.202.162:8000/predict";
+const uint32_t audio_post_timeout_ms = 15000;
+const uint32_t wifi_connect_timeout_ms = 10000;
+const uint32_t mqtt_connect_timeout_ms = 5000;
 
 // Amazon Root CA
 static const char AMAZON_ROOT_CA[] PROGMEM = R"EOF(
@@ -126,28 +125,24 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 // AUDIO CONFIG
 // =========================
 #define SAMPLE_RATE       16000
-#define AUDIO_BUFFER_SIZE 8000
-#define FRAME_LENGTH      400
-#define FRAME_STEP        160
-#define MFCC_FEATURES     26
-#define MFCC_FRAMES       128
-#define MEL_FILTERS       26
-#define FFT_SIZE          512
-#define PREEMPHASIS       0.97f
+#define VAD_FRAME_MS      20
+#define VAD_FRAME_SAMPLES ((SAMPLE_RATE * VAD_FRAME_MS) / 1000)
+#define FULL_AUDIO_SECONDS 3
+#define FULL_AUDIO_SAMPLES (SAMPLE_RATE * FULL_AUDIO_SECONDS)
+#define PCM_BYTES_PER_SAMPLE 2
 
 // =========================
 // THRESHOLDS / INTERVALS
 // =========================
-#define ENERGY_THRESHOLD  0.10f
-#define CRY_THRESHOLD     0.40f
+#define ENERGY_THRESHOLD  1200
+#define ZCR_MIN           20
+#define ZCR_MAX           140
+#define CRY_COUNT_TRIGGER 10
 
 const unsigned long MOTION_INTERVAL = 200;
 const unsigned long ENV_INTERVAL    = 2000;
 const unsigned long HEART_INTERVAL  = 40;
-const unsigned long CRY_INTERVAL    = 3500;
-
 const unsigned long STATUS_PUBLISH_INTERVAL = 10000;
-const unsigned long CRY_EVENT_COOLDOWN      = 8000;
 
 const float MOTION_THRESHOLD = 0.18f;
 const float MOTION_BASELINE_ALPHA = 0.95f;
@@ -176,10 +171,6 @@ PubSubClient client(net);
 // DATA STRUCTURE
 // =========================
 struct SensorData {
-  bool cryDetected;
-  float cryConfidence;
-  float audioEnergy;
-
   float motionMagnitude;
   bool motionDetected;
 
@@ -197,20 +188,14 @@ struct SensorData {
 SensorData dataPacket;
 
 // =========================
-// TFLITE / AUDIO BUFFERS
+// AUDIO BUFFERS
 // =========================
-float* audioBuffer = nullptr;
-float* mfccMatrix = nullptr;
-uint8_t* tensorArena = nullptr;
-
-double vReal[FFT_SIZE];
-double vImag[FFT_SIZE];
-ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, FFT_SIZE, SAMPLE_RATE);
-
-const tflite::Model* model = nullptr;
-tflite::MicroInterpreter* interpreter = nullptr;
-TfLiteTensor* input = nullptr;
-TfLiteTensor* output = nullptr;
+int16_t* audioCaptureBuffer = nullptr;
+static int16_t vadFrame[VAD_FRAME_SAMPLES];
+SemaphoreHandle_t i2sMutex = nullptr;
+volatile bool audioCaptureInProgress = false;
+int cryCount = 0;
+TaskHandle_t audioTaskHandle = nullptr;
 
 // =========================
 // TIMERS
@@ -218,11 +203,7 @@ TfLiteTensor* output = nullptr;
 unsigned long lastMotionRead = 0;
 unsigned long lastEnvRead = 0;
 unsigned long lastHeartRead = 0;
-unsigned long lastCryCheck = 0;
 unsigned long lastStatusPublish = 0;
-unsigned long lastCryEventSent = 0;
-bool previousCryDetected = false;
-int consecutive_cries = 0;
 
 // =========================
 // MOTION BASELINE
@@ -255,31 +236,33 @@ void initI2CBus();
 void initMPU6050();
 void initBME280();
 void initMAX30102();
-void initCryModel();
+void initAudioCapture();
 void setupI2S();
-void captureAudio();
-float computeEnergy();
-void computeMFCC();
-int calculateValidMfccFrames();
-float hzToMel(float hz);
-float melToHz(float mel);
-void applyHammingWindow(float *frame, int len);
+bool readI2SSamplesRaw(int16_t* dest, size_t sampleCount);
+float computeEnergy(const int16_t* frame, size_t len);
+int computeZCR(const int16_t* frame, size_t len);
+void runVAD();
+void audioCaptureTask(void* param);
+bool uploadAudioHTTP(const int16_t* pcm, size_t sampleCount);
 
+void setupWiFi();
+void setupMQTT();
+void reconnectMQTT();
+bool connectMQTT();
 void connectWiFi();
-void connectMQTT();
-void ensureMqttConnection();
+
 bool publishMessage(const String& payload);
 
 void readMotionSensor();
 void readEnvironmentSensor();
 void readHeartRateSensor();
-void runCryDetection();
+void readVitals(unsigned long now);
+void publishVitalsMQTT(unsigned long now);
 
 void updateAverageSnapshot();
 void resetAverageWindows();
 
 String buildStatusPayload();
-String buildCryEventPayload();
 
 // =========================
 // SETUP
@@ -294,18 +277,10 @@ void setup() {
   initMPU6050();
   initBME280();
   initMAX30102();
-  initCryModel();
+  initAudioCapture();
 
-  connectWiFi();
-
-  net.setCACert(AMAZON_ROOT_CA);
-  net.setCertificate(DEVICE_CERT);
-  net.setPrivateKey(DEVICE_PRIVATE_KEY);
-
-  client.setServer(mqtt_server, mqtt_port);
-  client.setBufferSize(1024);
-
-  connectMQTT();
+  setupWiFi();
+  setupMQTT();
 
   Serial.println("===== SYSTEM READY =====");
 }
@@ -316,79 +291,33 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  ensureMqttConnection();
+  reconnectMQTT();
   client.loop();
 
-  if (now - lastMotionRead >= MOTION_INTERVAL) {
-    lastMotionRead = now;
-    readMotionSensor();
-  }
-
-  if (now - lastEnvRead >= ENV_INTERVAL) {
-    lastEnvRead = now;
-    readEnvironmentSensor();
-  }
-
-  if (now - lastHeartRead >= HEART_INTERVAL) {
-    lastHeartRead = now;
-    readHeartRateSensor();
-  }
-
-  if (now - lastCryCheck >= CRY_INTERVAL) {
-    lastCryCheck = now;
-    runCryDetection();
-  }
-
-  if (now - lastStatusPublish >= STATUS_PUBLISH_INTERVAL) {
-    lastStatusPublish = now;
-    dataPacket.timestamp = millis();
-
-    updateAverageSnapshot();
-
-    String statusPayload = buildStatusPayload();
-    Serial.println("Publishing STATUS:");
-    Serial.println(statusPayload);
-    publishMessage(statusPayload);
-
-    resetAverageWindows();
-  }
+  readVitals(now);
+  runVAD();
+  publishVitalsMQTT(now);
 }
 
 // =========================
 // WIFI / MQTT
 // =========================
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+void setupWiFi() {
+  connectWiFi();
 }
 
-void connectMQTT() {
-  while (!client.connected()) {
-    Serial.print("Connecting to AWS IoT MQTT...");
+void setupMQTT() {
+  net.setCACert(AMAZON_ROOT_CA);
+  net.setCertificate(DEVICE_CERT);
+  net.setPrivateKey(DEVICE_PRIVATE_KEY);
 
-    if (client.connect(mqtt_client_id)) {
-      Serial.println("connected");
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" retrying in 5 seconds");
-      delay(5000);
-    }
-  }
+  client.setServer(mqtt_server, mqtt_port);
+  client.setBufferSize(1024);
+
+  connectMQTT();
 }
 
-void ensureMqttConnection() {
+void reconnectMQTT() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi lost. Reconnecting...");
     connectWiFi();
@@ -399,10 +328,62 @@ void ensureMqttConnection() {
   }
 }
 
+void connectWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting to WiFi");
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < wifi_connect_timeout_ms) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.print("WiFi connect timeout after ");
+    Serial.print(wifi_connect_timeout_ms);
+    Serial.println(" ms");
+  }
+}
+
+bool connectMQTT() {
+  unsigned long start = millis();
+  while (!client.connected() && (millis() - start) < mqtt_connect_timeout_ms) {
+    Serial.print("Connecting to AWS IoT MQTT...");
+
+    if (client.connect(mqtt_client_id)) {
+      Serial.println("connected");
+      return true;
+    }
+
+    Serial.print("failed, rc=");
+    Serial.print(client.state());
+    Serial.println(" retrying...");
+    delay(500);
+  }
+
+  if (!client.connected()) {
+    Serial.print("MQTT connect timeout after ");
+    Serial.print(mqtt_connect_timeout_ms);
+    Serial.println(" ms");
+  }
+
+  return client.connected();
+}
+
 bool publishMessage(const String& payload) {
+  if (!client.connected()) {
+    Serial.println("[MQTT] Not connected, skipping publish");
+    return false;
+  }
   bool ok = client.publish(mqtt_topic, payload.c_str());
   if (!ok) {
-    Serial.println("MQTT publish failed");
+    Serial.println("[MQTT] Publish failed");
   }
   return ok;
 }
@@ -411,10 +392,6 @@ bool publishMessage(const String& payload) {
 // INITIALIZATION
 // =========================
 void initPacket() {
-  dataPacket.cryDetected = false;
-  dataPacket.cryConfidence = 0.0f;
-  dataPacket.audioEnergy = 0.0f;
-
   dataPacket.motionMagnitude = 0.0f;
   dataPacket.motionDetected = false;
 
@@ -497,56 +474,30 @@ void initMAX30102() {
   Serial.println("MAX30102 connected.");
 }
 
-void initCryModel() {
-  Serial.println("Initializing cry detection model...");
+void initAudioCapture() {
+  Serial.println("Initializing audio capture...");
 
   if (!psramFound()) {
     Serial.println("PSRAM NOT FOUND");
     while (1);
   }
 
-  audioBuffer = (float*) heap_caps_malloc(sizeof(float) * AUDIO_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
-  mfccMatrix  = (float*) heap_caps_malloc(sizeof(float) * MFCC_FRAMES * MFCC_FEATURES, MALLOC_CAP_SPIRAM);
-  tensorArena = (uint8_t*) heap_caps_malloc(300 * 1024, MALLOC_CAP_SPIRAM);
+  size_t pcm_bytes = FULL_AUDIO_SAMPLES * sizeof(int16_t);
+  audioCaptureBuffer = (int16_t*) heap_caps_malloc(pcm_bytes, MALLOC_CAP_SPIRAM);
 
-  if (!audioBuffer || !mfccMatrix || !tensorArena) {
-    Serial.println("Cry model memory allocation failed");
+  if (!audioCaptureBuffer) {
+    Serial.println("Audio buffer allocation failed");
+    while (1);
+  }
+
+  i2sMutex = xSemaphoreCreateMutex();
+  if (!i2sMutex) {
+    Serial.println("I2S mutex allocation failed");
     while (1);
   }
 
   setupI2S();
-
-  model = tflite::GetModel(cnn_model_tflite);
-
-  static tflite::MicroMutableOpResolver<10> resolver;
-  resolver.AddConv2D();
-  resolver.AddDepthwiseConv2D();
-  resolver.AddFullyConnected();
-  resolver.AddSoftmax();
-  resolver.AddReshape();
-  resolver.AddMaxPool2D();
-  resolver.AddLogistic();
-
-  static tflite::MicroErrorReporter micro_error_reporter;
-  tflite::ErrorReporter* error_reporter = &micro_error_reporter;
-
-  static tflite::MicroInterpreter static_interpreter(model, resolver, tensorArena, 300 * 1024, error_reporter);
-  interpreter = &static_interpreter;
-
-  if (interpreter->AllocateTensors() != kTfLiteOk) {
-    Serial.println("Tensor allocation failed");
-    while (1);
-  }
-
-  input = interpreter->input(0);
-  output = interpreter->output(0);
-
-  if (!input || !output) {
-    Serial.println("Tensor pointer error");
-    while (1);
-  }
-
-  Serial.println("Cry model ready.");
+  Serial.println("Audio capture ready.");
 }
 
 // =========================
@@ -681,93 +632,154 @@ void readHeartRateSensor() {
   updateAverageSnapshot();
 }
 
-void runCryDetection() {
-  captureAudio();
+void readVitals(unsigned long now) {
+  if (now - lastMotionRead >= MOTION_INTERVAL) {
+    lastMotionRead = now;
+    readMotionSensor();
+  }
 
-  float energy = computeEnergy();
-  dataPacket.audioEnergy = energy;
+  if (now - lastEnvRead >= ENV_INTERVAL) {
+    lastEnvRead = now;
+    readEnvironmentSensor();
+  }
 
-  if (energy < ENERGY_THRESHOLD) {
-    dataPacket.cryConfidence = 0.0f;
-    dataPacket.cryDetected = false;
-    previousCryDetected = false;
+  if (now - lastHeartRead >= HEART_INTERVAL) {
+    lastHeartRead = now;
+    readHeartRateSensor();
+  }
+}
+
+void publishVitalsMQTT(unsigned long now) {
+  if (now - lastStatusPublish >= STATUS_PUBLISH_INTERVAL) {
+    lastStatusPublish = now;
+    dataPacket.timestamp = millis();
+
+    updateAverageSnapshot();
+
+    String statusPayload = buildStatusPayload();
+    if (publishMessage(statusPayload)) {
+      Serial.println("[MQTT] Published vitals");
+    }
+
+    resetAverageWindows();
+  }
+}
+
+float computeEnergy(const int16_t* frame, size_t len) {
+  if (!frame || len == 0) return 0.0f;
+  uint32_t sumAbs = 0;
+  for (size_t i = 0; i < len; i++) {
+    sumAbs += (uint32_t)abs(frame[i]);
+  }
+  return (float)sumAbs / (float)len;
+}
+
+int computeZCR(const int16_t* frame, size_t len) {
+  if (!frame || len < 2) return 0;
+  int zcr = 0;
+  int prevSign = (frame[0] >= 0) ? 1 : -1;
+  for (size_t i = 1; i < len; i++) {
+    int sign = (frame[i] >= 0) ? 1 : -1;
+    if (sign != prevSign) {
+      zcr++;
+    }
+    prevSign = sign;
+  }
+  return zcr;
+}
+
+void runVAD() {
+  if (audioCaptureInProgress || !i2sMutex) {
     return;
   }
 
-  computeMFCC();
-
-  int idx = 0;
-  int maxFloats = input->bytes / sizeof(float);
-  int needed = MFCC_FRAMES * MFCC_FEATURES;
-
-  if (maxFloats < needed) {
-    Serial.println("Input tensor too small");
-    dataPacket.cryConfidence = 0.0f;
-    dataPacket.cryDetected = false;
-    previousCryDetected = false;
+  if (xSemaphoreTake(i2sMutex, 0) != pdTRUE) {
     return;
   }
 
-  for (int i = 0; i < MFCC_FRAMES; i++) {
-    for (int j = 0; j < MFCC_FEATURES; j++) {
-      float raw_val = mfccMatrix[i * MFCC_FEATURES + j];
-      float normalized = (raw_val - MFCC_MEAN[j]) / MFCC_STD[j];
-      input->data.f[idx++] = normalized;
+  bool ok = readI2SSamplesRaw(vadFrame, VAD_FRAME_SAMPLES);
+  xSemaphoreGive(i2sMutex);
+
+  if (!ok) {
+    Serial.println("[VAD] I2S read failed");
+    return;
+  }
+
+  float energy = computeEnergy(vadFrame, VAD_FRAME_SAMPLES);
+  int zcr = computeZCR(vadFrame, VAD_FRAME_SAMPLES);
+
+  Serial.print("[VAD] Energy=");
+  Serial.print(energy, 1);
+  Serial.print(" ZCR=");
+  Serial.println(zcr);
+
+  bool cryFrame = (energy > ENERGY_THRESHOLD) && (zcr >= ZCR_MIN && zcr <= ZCR_MAX);
+  if (cryFrame) {
+    cryCount++;
+  } else if (cryCount > 0) {
+    cryCount--;
+  }
+
+  Serial.print("[VAD] Cry count=");
+  Serial.println(cryCount);
+
+  if (cryCount >= CRY_COUNT_TRIGGER && !audioCaptureInProgress) {
+    Serial.println("[VAD] Cry detected");
+    cryCount = 0;
+    audioCaptureInProgress = true;
+
+    BaseType_t created = xTaskCreatePinnedToCore(
+      audioCaptureTask,
+      "audioCaptureTask",
+      8192,
+      nullptr,
+      1,
+      &audioTaskHandle,
+      1
+    );
+
+    if (created != pdPASS) {
+      Serial.println("[AUDIO] Task create failed");
+      audioCaptureInProgress = false;
     }
   }
+}
 
-  // Debug print to check normalization scaling
-  Serial.print("MFCC[0][0] after norm: ");
-  Serial.println(input->data.f[0], 4);
-
-  if (interpreter->Invoke() != kTfLiteOk) {
-    Serial.println("Cry inference failed");
-    dataPacket.cryConfidence = 0.0f;
-    dataPacket.cryDetected = false;
-    previousCryDetected = false;
+void audioCaptureTask(void* param) {
+  (void)param;
+  if (!audioCaptureBuffer || !i2sMutex) {
+    Serial.println("[AUDIO] Buffer or mutex missing");
+    audioCaptureInProgress = false;
+    vTaskDelete(nullptr);
     return;
   }
 
-  float result = output->data.f[0];
-  
-  if (result >= CRY_THRESHOLD && energy > ENERGY_THRESHOLD) {
-    consecutive_cries++;
+  Serial.println("[AUDIO] Capturing 3 sec");
+  if (xSemaphoreTake(i2sMutex, portMAX_DELAY) != pdTRUE) {
+    Serial.println("[AUDIO] Failed to lock I2S");
+    audioCaptureInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  bool ok = readI2SSamplesRaw(audioCaptureBuffer, FULL_AUDIO_SAMPLES);
+  xSemaphoreGive(i2sMutex);
+
+  if (!ok) {
+    Serial.println("[AUDIO] Capture failed");
+    audioCaptureInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  if (uploadAudioHTTP(audioCaptureBuffer, FULL_AUDIO_SAMPLES)) {
+    Serial.println("[HTTP] Upload success");
   } else {
-    consecutive_cries = 0;
-  }
-  
-  // Debug print to monitor the model's confidence in real-time
-  Serial.print("Energy: ");
-  Serial.print(energy, 4);
-  Serial.print(" | Confidence: ");
-  Serial.print(result, 4);
-  Serial.print(" | Consecutive Cries: ");
-  Serial.println(consecutive_cries);
-  
-  bool currentCry = (consecutive_cries >= 3);
-
-  dataPacket.cryConfidence = result;
-  dataPacket.cryDetected = currentCry;
-
-  if (currentCry) {
-    unsigned long now = millis();
-    bool risingEdge = !previousCryDetected;
-    bool cooldownExpired = (now - lastCryEventSent >= CRY_EVENT_COOLDOWN);
-
-    if (risingEdge || cooldownExpired) {
-      dataPacket.timestamp = now;
-      updateAverageSnapshot();
-
-      String cryPayload = buildCryEventPayload();
-      Serial.println("Publishing CRY EVENT:");
-      Serial.println(cryPayload);
-      publishMessage(cryPayload);
-
-      lastCryEventSent = now;
-    }
+    Serial.println("[HTTP] Upload failed");
   }
 
-  previousCryDetected = currentCry;
+  audioCaptureInProgress = false;
+  vTaskDelete(nullptr);
 }
 
 // =========================
@@ -779,37 +791,6 @@ String buildStatusPayload() {
   json += ",\"timestamp\":" + String(dataPacket.timestamp);
   json += ",\"event\":\"sensor_status\"";
   json += ",\"avgWindowSec\":10";
-
-  json += ",\"motion\":{";
-  json += "\"magnitude\":" + String(dataPacket.motionMagnitude, 4);
-  json += ",\"detected\":" + String(dataPacket.motionDetected ? "true" : "false");
-  json += "}";
-
-  json += ",\"heart\":{";
-  json += "\"bpm\":" + String(dataPacket.heartRateAvg, 2);
-  json += ",\"fingerDetected\":" + String(dataPacket.fingerDetected ? "true" : "false");
-  json += ",\"valid\":" + String(dataPacket.heartRateValid ? "true" : "false");
-  json += "}";
-
-  json += ",\"environment\":{";
-  json += "\"temperature\":" + String(dataPacket.temperatureAvg, 2);
-  json += ",\"humidity\":" + String(dataPacket.humidityAvg, 2);
-  json += ",\"valid\":" + String(dataPacket.envValid ? "true" : "false");
-  json += "}";
-
-  json += "}";
-  return json;
-}
-
-String buildCryEventPayload() {
-  String json = "{";
-  json += "\"device_id\":\"" + String(DEVICE_ID) + "\"";
-  json += ",\"timestamp\":" + String(dataPacket.timestamp);
-  json += ",\"event\":\"cry_alert\"";
-  json += ",\"avgWindowSec\":10";
-  json += ",\"cryDetected\":true";
-  json += ",\"cryConfidence\":" + String(dataPacket.cryConfidence, 4);
-  json += ",\"audioEnergy\":" + String(dataPacket.audioEnergy, 4);
 
   json += ",\"motion\":{";
   json += "\"magnitude\":" + String(dataPacket.motionMagnitude, 4);
@@ -859,147 +840,67 @@ void setupI2S() {
   i2s_zero_dma_buffer(I2S_PORT);
 }
 
-void captureAudio() {
-  size_t bytesRead = 0;
-  int index = 0;
+bool readI2SSamplesRaw(int16_t* dest, size_t sampleCount) {
+  if (sampleCount == 0 || !dest) return false;
 
-  while (index < AUDIO_BUFFER_SIZE) {
+  size_t bytesRead = 0;
+  size_t index = 0;
+
+  while (index < sampleCount) {
     int32_t temp[256];
-    i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, portMAX_DELAY);
+    esp_err_t err = i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, portMAX_DELAY);
+    if (err != ESP_OK || bytesRead == 0) {
+      return false;
+    }
 
     int samples = bytesRead / sizeof(int32_t);
-
-    for (int i = 0; i < samples && index < AUDIO_BUFFER_SIZE; i++) {
-      float val = (float)temp[i] / 8388608.0f;
-
-      if (val > 1.0f) val = 1.0f;
-      if (val < -1.0f) val = -1.0f;
-
-      audioBuffer[index++] = val;
+    for (int i = 0; i < samples && index < sampleCount; i++) {
+      int16_t sample16 = (int16_t)(temp[i] >> 8);
+      dest[index++] = sample16;
     }
   }
+
+  return true;
 }
 
-float computeEnergy() {
-  float sum = 0.0f;
-  for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
-    sum += fabs(audioBuffer[i]);
+bool uploadAudioHTTP(const int16_t* pcm, size_t sampleCount) {
+  if (!pcm || sampleCount == 0) return false;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] WiFi not connected, retrying");
+    connectWiFi();
   }
-  return sum / AUDIO_BUFFER_SIZE;
-}
-
-int calculateValidMfccFrames() {
-  if (AUDIO_BUFFER_SIZE <= 0) return 0;
-  if (AUDIO_BUFFER_SIZE < FRAME_LENGTH) return 1;
-
-  int frames = 1 + ((AUDIO_BUFFER_SIZE - FRAME_LENGTH) / FRAME_STEP);
-  if (frames < 1) frames = 1;
-  if (frames > MFCC_FRAMES) frames = MFCC_FRAMES;
-  return frames;
-}
-
-void computeMFCC() {
-  for (int i = AUDIO_BUFFER_SIZE - 1; i > 0; i--) {
-    audioBuffer[i] -= PREEMPHASIS * audioBuffer[i - 1];
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] WiFi still offline, skipping upload");
+    return false;
   }
 
-  int validFrames = calculateValidMfccFrames();
+  HTTPClient http;
+  WiFiClient httpClient;
 
-  static float melBank[MEL_FILTERS][FFT_SIZE / 2 + 1];
-  static bool built = false;
-
-  if (!built) {
-    for (int m = 0; m < MEL_FILTERS; m++) {
-      for (int k = 0; k <= FFT_SIZE / 2; k++) {
-        melBank[m][k] = 0.0f;
-      }
-    }
-
-    float lowMel = hzToMel(0.0f);
-    float highMel = hzToMel((float)SAMPLE_RATE / 2.0f);
-
-    float melPts[MEL_FILTERS + 2];
-    int bins[MEL_FILTERS + 2];
-
-    for (int i = 0; i < MEL_FILTERS + 2; i++) {
-      melPts[i] = lowMel + (highMel - lowMel) * i / (MEL_FILTERS + 1);
-      float hz = melToHz(melPts[i]);
-      bins[i] = (int)(((FFT_SIZE + 1) * hz) / SAMPLE_RATE);
-
-      if (bins[i] < 0) bins[i] = 0;
-      if (bins[i] > FFT_SIZE / 2) bins[i] = FFT_SIZE / 2;
-    }
-
-    for (int m = 1; m <= MEL_FILTERS; m++) {
-      int left = bins[m - 1];
-      int center = bins[m];
-      int right = bins[m + 1];
-
-      if (center <= left) center = left + 1;
-      if (right <= center) right = center + 1;
-      if (right > FFT_SIZE / 2) right = FFT_SIZE / 2;
-
-      for (int k = left; k < center; k++) {
-        melBank[m - 1][k] = (float)(k - left) / (float)(center - left);
-      }
-
-      for (int k = center; k < right; k++) {
-        melBank[m - 1][k] = (float)(right - k) / (float)(right - center);
-      }
-    }
-
-    built = true;
+  if (!http.begin(httpClient, audio_post_url)) {
+    Serial.println("[HTTP] Begin failed");
+    return false;
   }
 
-  for (int f = 0; f < MFCC_FRAMES; f++) {
-    int start = f * FRAME_STEP;
-    float frame[FRAME_LENGTH];
-    bool useRealAudio = (f < validFrames);
+  http.setTimeout(audio_post_timeout_ms);
+  http.addHeader("Content-Type", "application/octet-stream");
 
-    for (int i = 0; i < FRAME_LENGTH; i++) {
-      frame[i] = (useRealAudio && (start + i < AUDIO_BUFFER_SIZE)) ? audioBuffer[start + i] : 0.0f;
-    }
+  int payload_bytes = (int)(sampleCount * sizeof(int16_t));
+  int httpCode = http.POST((uint8_t*)pcm, payload_bytes);
 
-    applyHammingWindow(frame, FRAME_LENGTH);
-
-    for (int i = 0; i < FFT_SIZE; i++) {
-      vReal[i] = (i < FRAME_LENGTH) ? frame[i] : 0.0;
-      vImag[i] = 0.0;
-    }
-
-    FFT.compute(FFT_FORWARD);
-    FFT.complexToMagnitude();
-
-    float melE[MEL_FILTERS];
-
-    for (int m = 0; m < MEL_FILTERS; m++) {
-      float sum = 0.0f;
-      for (int k = 0; k <= FFT_SIZE / 2; k++) {
-        sum += (float)vReal[k] * melBank[m][k];
-      }
-      melE[m] = logf(sum + 1e-6f);
-    }
-
-    for (int c = 0; c < MFCC_FEATURES; c++) {
-      float val = 0.0f;
-      for (int m = 0; m < MEL_FILTERS; m++) {
-        val += melE[m] * cosf((PI * c * (m + 0.5f)) / MEL_FILTERS);
-      }
-      mfccMatrix[f * MFCC_FEATURES + c] = val;
-    }
+  if (httpCode <= 0) {
+    Serial.print("[HTTP] POST error: ");
+    Serial.println(http.errorToString(httpCode));
+    http.end();
+    return false;
   }
-}
 
-float hzToMel(float hz) {
-  return 2595.0f * log10f(1.0f + hz / 700.0f);
-}
+  Serial.print("[HTTP] Status: ");
+  Serial.println(httpCode);
+  String response = http.getString();
+  Serial.print("[HTTP] Response: ");
+  Serial.println(response);
+  http.end();
 
-float melToHz(float mel) {
-  return 700.0f * (powf(10.0f, mel / 2595.0f) - 1.0f);
-}
-
-void applyHammingWindow(float *frame, int len) {
-  for (int i = 0; i < len; i++) {
-    frame[i] *= (0.54f - 0.46f * cosf((2.0f * PI * i) / (len - 1)));
-  }
+  return (httpCode >= 200 && httpCode < 300);
 }

@@ -104,6 +104,13 @@ async def root():
     }
 
 
+# ── Top-level /predict alias ─────────────────────────────────
+# The ESP32 firmware POSTs raw PCM bytes to /predict (not /api/cry/predict).
+# This top-level route delegates to the same handler so both paths work.
+from app.routes.cry_events import predict_cry_audio
+app.post("/predict", tags=["Cry Events"])(predict_cry_audio)
+
+
 @app.get("/api/health", tags=["Health"])
 async def health_check():
     """
