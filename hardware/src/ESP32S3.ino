@@ -17,14 +17,15 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "model_data.h"
 #include "mfcc_norm_stats.h"
 
 // =========================
 // WIFI / AWS IOT
 // =========================
-const char* ssid = "MS-Router_Plus";
-const char* password = "zee12345";
+const char* ssid = "Note 10";
+const char* password = "23456789";
 
 const char* mqtt_server = "a36ya5skrm71sd-ats.iot.ap-southeast-2.amazonaws.com";
 const int mqtt_port = 8883;
@@ -506,7 +507,7 @@ void initCryModel() {
 
   audioBuffer = (float*) heap_caps_malloc(sizeof(float) * AUDIO_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
   mfccMatrix  = (float*) heap_caps_malloc(sizeof(float) * MFCC_FRAMES * MFCC_FEATURES, MALLOC_CAP_SPIRAM);
-  tensorArena = (uint8_t*) heap_caps_malloc(220 * 1024, MALLOC_CAP_SPIRAM);
+  tensorArena = (uint8_t*) heap_caps_malloc(300 * 1024, MALLOC_CAP_SPIRAM);
 
   if (!audioBuffer || !mfccMatrix || !tensorArena) {
     Serial.println("Cry model memory allocation failed");
@@ -526,7 +527,10 @@ void initCryModel() {
   resolver.AddMaxPool2D();
   resolver.AddLogistic();
 
-  static tflite::MicroInterpreter static_interpreter(model, resolver, tensorArena, 220 * 1024);
+  static tflite::MicroErrorReporter micro_error_reporter;
+  tflite::ErrorReporter* error_reporter = &micro_error_reporter;
+
+  static tflite::MicroInterpreter static_interpreter(model, resolver, tensorArena, 300 * 1024, error_reporter);
   interpreter = &static_interpreter;
 
   if (interpreter->AllocateTensors() != kTfLiteOk) {
@@ -712,6 +716,10 @@ void runCryDetection() {
     }
   }
 
+  // Debug print to check normalization scaling
+  Serial.print("MFCC[0][0] after norm: ");
+  Serial.println(input->data.f[0], 4);
+
   if (interpreter->Invoke() != kTfLiteOk) {
     Serial.println("Cry inference failed");
     dataPacket.cryConfidence = 0.0f;
@@ -727,6 +735,14 @@ void runCryDetection() {
   } else {
     consecutive_cries = 0;
   }
+  
+  // Debug print to monitor the model's confidence in real-time
+  Serial.print("Energy: ");
+  Serial.print(energy, 4);
+  Serial.print(" | Confidence: ");
+  Serial.print(result, 4);
+  Serial.print(" | Consecutive Cries: ");
+  Serial.println(consecutive_cries);
   
   bool currentCry = (consecutive_cries >= 3);
 
