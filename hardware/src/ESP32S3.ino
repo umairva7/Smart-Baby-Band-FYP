@@ -21,8 +21,8 @@
 // =========================
 // WIFI / AWS IOT 
 // =========================
-const char* ssid = "Imran Kashif";
-const char* password = "justwait";
+const char* ssid = "Note 10";
+const char* password = "23456789";
 
 const char* mqtt_server = "a36ya5skrm71sd-ats.iot.ap-southeast-2.amazonaws.com";
 const int mqtt_port = 8883;
