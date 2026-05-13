@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
+#include <string.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
@@ -10,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include <time.h>
 #include <MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
@@ -17,10 +19,10 @@
 #include <heartRate.h>
 
 // =========================
-// WIFI / AWS IOT
+// WIFI / AWS IOT 
 // =========================
-const char* ssid = "Note 10";
-const char* password = "23456789";
+const char* ssid = "Imran Kashif";
+const char* password = "justwait";
 
 const char* mqtt_server = "a36ya5skrm71sd-ats.iot.ap-southeast-2.amazonaws.com";
 const int mqtt_port = 8883;
@@ -127,17 +129,23 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 #define SAMPLE_RATE       16000
 #define VAD_FRAME_MS      20
 #define VAD_FRAME_SAMPLES ((SAMPLE_RATE * VAD_FRAME_MS) / 1000)
+#define PRE_TRIGGER_SECONDS 2
+#define POST_TRIGGER_SECONDS 1
 #define FULL_AUDIO_SECONDS 3
+#define PRE_TRIGGER_SAMPLES (SAMPLE_RATE * PRE_TRIGGER_SECONDS)
+#define POST_TRIGGER_SAMPLES (SAMPLE_RATE * POST_TRIGGER_SECONDS)
 #define FULL_AUDIO_SAMPLES (SAMPLE_RATE * FULL_AUDIO_SECONDS)
 #define PCM_BYTES_PER_SAMPLE 2
 
 // =========================
 // THRESHOLDS / INTERVALS
 // =========================
-#define ENERGY_THRESHOLD  1200
-#define ZCR_MIN           20
-#define ZCR_MAX           140
-#define CRY_COUNT_TRIGGER 10
+#define ENERGY_THRESHOLD  7000
+#define ZCR_MIN           35
+#define ZCR_MAX           110
+#define CRY_COUNT_TRIGGER 12
+#define CRY_COOLDOWN_MS   8000
+#define PEAK_THRESHOLD    14000
 
 const unsigned long MOTION_INTERVAL = 200;
 const unsigned long ENV_INTERVAL    = 2000;
@@ -190,12 +198,19 @@ SensorData dataPacket;
 // =========================
 // AUDIO BUFFERS
 // =========================
-int16_t* audioCaptureBuffer = nullptr;
+int16_t* circularBuffer = nullptr;
+int16_t* audioClipBuffer = nullptr;
+size_t circularWriteIndex = 0;
+size_t circularSamplesWritten = 0;
 static int16_t vadFrame[VAD_FRAME_SAMPLES];
 SemaphoreHandle_t i2sMutex = nullptr;
+SemaphoreHandle_t audioClipMutex = nullptr;
 volatile bool audioCaptureInProgress = false;
+volatile bool audioUploadInProgress = false;
 int cryCount = 0;
-TaskHandle_t audioTaskHandle = nullptr;
+TaskHandle_t audioCaptureTaskHandle = nullptr;
+TaskHandle_t audioUploadTaskHandle = nullptr;
+unsigned long lastCryTrigger = 0;
 
 // =========================
 // TIMERS
@@ -204,6 +219,8 @@ unsigned long lastMotionRead = 0;
 unsigned long lastEnvRead = 0;
 unsigned long lastHeartRead = 0;
 unsigned long lastStatusPublish = 0;
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long MQTT_RECONNECT_INTERVAL = 15000;  // 15s between reconnect attempts
 
 // =========================
 // MOTION BASELINE
@@ -239,10 +256,14 @@ void initMAX30102();
 void initAudioCapture();
 void setupI2S();
 bool readI2SSamplesRaw(int16_t* dest, size_t sampleCount);
+void writeCircularBuffer(const int16_t* samples, size_t sampleCount);
+void extractBufferedAudio(int16_t* dest, size_t sampleCount);
+bool captureFutureAudio(int16_t* dest, size_t sampleCount);
 float computeEnergy(const int16_t* frame, size_t len);
 int computeZCR(const int16_t* frame, size_t len);
 void runVAD();
 void audioCaptureTask(void* param);
+void audioUploadTask(void* param);
 bool uploadAudioHTTP(const int16_t* pcm, size_t sampleCount);
 
 void setupWiFi();
@@ -304,6 +325,35 @@ void loop() {
 // =========================
 void setupWiFi() {
   connectWiFi();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    // UTC+5 (Pakistan Standard Time) = 18000 seconds offset
+    configTime(18000, 0, "pool.ntp.org", "time.nist.gov");
+
+    Serial.print("[NTP] Syncing time");
+    time_t now = time(nullptr);
+    unsigned long start = millis();
+
+    // Wait up to 20 seconds for NTP sync — TLS WILL NOT WORK without correct time
+    while (now < 1700000000 && (millis() - start) < 20000) {
+      delay(500);
+      Serial.print(".");
+      now = time(nullptr);
+    }
+
+    Serial.println();
+
+    if (now >= 1700000000) {
+      struct tm timeinfo;
+      localtime_r(&now, &timeinfo);
+      Serial.print("[NTP] Time synced: ");
+      Serial.println(asctime(&timeinfo));
+    } else {
+      Serial.println("[NTP] *** TIME SYNC FAILED — TLS/MQTT will not work! ***");
+      Serial.print("[NTP] Current time value: ");
+      Serial.println((unsigned long)now);
+    }
+  }
 }
 
 void setupMQTT() {
@@ -318,18 +368,30 @@ void setupMQTT() {
 }
 
 void reconnectMQTT() {
+  // Don't attempt reconnect if already connected
+  if (client.connected()) return;
+
+  // Non-blocking: only attempt every MQTT_RECONNECT_INTERVAL
+  unsigned long now = millis();
+  if (now - lastMqttReconnectAttempt < MQTT_RECONNECT_INTERVAL) return;
+  lastMqttReconnectAttempt = now;
+
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi lost. Reconnecting...");
+    Serial.println("[MQTT] WiFi lost. Reconnecting...");
     connectWiFi();
+    if (WiFi.status() != WL_CONNECTED) return;
   }
 
-  if (!client.connected()) {
-    connectMQTT();
-  }
+  connectMQTT();
 }
 
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
+  // Use Google Public DNS — the Student network's DNS can't resolve
+  // AWS IoT hostnames (DNS Failed for *.iot.ap-southeast-2.amazonaws.com)
+  IPAddress dns1(8, 8, 8, 8);
+  IPAddress dns2(8, 8, 4, 4);
+  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, dns1, dns2);
   WiFi.begin(ssid, password);
 
   Serial.print("Connecting to WiFi");
@@ -344,6 +406,8 @@ void connectWiFi() {
     Serial.println("WiFi connected");
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    Serial.print("DNS: ");
+    Serial.println(WiFi.dnsIP());
   } else {
     Serial.print("WiFi connect timeout after ");
     Serial.print(wifi_connect_timeout_ms);
@@ -352,28 +416,57 @@ void connectWiFi() {
 }
 
 bool connectMQTT() {
-  unsigned long start = millis();
-  while (!client.connected() && (millis() - start) < mqtt_connect_timeout_ms) {
-    Serial.print("Connecting to AWS IoT MQTT...");
-
-    if (client.connect(mqtt_client_id)) {
-      Serial.println("connected");
-      return true;
+  // --- Verify system time before TLS ---
+  // WiFiClientSecure validates the server certificate against the system clock.
+  // If time is still at epoch (1970), TLS handshake silently fails → rc=-1.
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    Serial.print("[MQTT] Clock not set (epoch=");
+    Serial.print((unsigned long)now);
+    Serial.println("). Retrying NTP...");
+    configTime(18000, 0, "pool.ntp.org", "time.nist.gov");
+    unsigned long start = millis();
+    while (time(nullptr) < 1700000000 && (millis() - start) < 10000) {
+      delay(500);
     }
-
-    Serial.print("failed, rc=");
-    Serial.print(client.state());
-    Serial.println(" retrying...");
-    delay(500);
+    now = time(nullptr);
+    if (now < 1700000000) {
+      Serial.println("[MQTT] NTP still failed. Skipping MQTT attempt.");
+      return false;
+    }
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    Serial.print("[MQTT] Time synced: ");
+    Serial.println(asctime(&timeinfo));
   }
 
-  if (!client.connected()) {
-    Serial.print("MQTT connect timeout after ");
-    Serial.print(mqtt_connect_timeout_ms);
-    Serial.println(" ms");
+  // Single non-blocking attempt (no while-loop)
+  // The backoff timer in reconnectMQTT() handles retry spacing
+  Serial.print("[MQTT] Connecting to AWS IoT...");
+
+  if (client.connect(mqtt_client_id)) {
+    Serial.println("connected!");
+    return true;
   }
 
-  return client.connected();
+  Serial.print("failed, rc=");
+  Serial.print(client.state());
+  Serial.print(" (");
+  switch (client.state()) {
+    case -4: Serial.print("TIMEOUT"); break;
+    case -3: Serial.print("LOST_CONNECTION"); break;
+    case -2: Serial.print("CONNECT_FAILED"); break;
+    case -1: Serial.print("DISCONNECTED"); break;
+    case  1: Serial.print("BAD_PROTOCOL"); break;
+    case  2: Serial.print("BAD_CLIENT_ID"); break;
+    case  3: Serial.print("UNAVAILABLE"); break;
+    case  4: Serial.print("BAD_CREDENTIALS"); break;
+    case  5: Serial.print("UNAUTHORIZED"); break;
+    default: Serial.print("UNKNOWN"); break;
+  }
+  Serial.println("). Will retry in 15s.");
+
+  return false;
 }
 
 bool publishMessage(const String& payload) {
@@ -476,23 +569,33 @@ void initMAX30102() {
 
 void initAudioCapture() {
   Serial.println("Initializing audio capture...");
-
   if (!psramFound()) {
     Serial.println("PSRAM NOT FOUND");
     while (1);
   }
 
-  size_t pcm_bytes = FULL_AUDIO_SAMPLES * sizeof(int16_t);
-  audioCaptureBuffer = (int16_t*) heap_caps_malloc(pcm_bytes, MALLOC_CAP_SPIRAM);
+  size_t circular_bytes = FULL_AUDIO_SAMPLES * sizeof(int16_t);
+  circularBuffer = (int16_t*) heap_caps_malloc(circular_bytes, MALLOC_CAP_SPIRAM);
+  audioClipBuffer = (int16_t*) heap_caps_malloc(circular_bytes, MALLOC_CAP_SPIRAM);
 
-  if (!audioCaptureBuffer) {
+  if (!circularBuffer || !audioClipBuffer) {
     Serial.println("Audio buffer allocation failed");
     while (1);
   }
 
+  memset(circularBuffer, 0, circular_bytes);
+  circularWriteIndex = 0;
+  circularSamplesWritten = 0;
+
   i2sMutex = xSemaphoreCreateMutex();
   if (!i2sMutex) {
     Serial.println("I2S mutex allocation failed");
+    while (1);
+  }
+
+  audioClipMutex = xSemaphoreCreateMutex();
+  if (!audioClipMutex) {
+    Serial.println("Audio clip mutex allocation failed");
     while (1);
   }
 
@@ -656,6 +759,35 @@ void publishVitalsMQTT(unsigned long now) {
 
     updateAverageSnapshot();
 
+    // --- Print vitals to serial (always, regardless of MQTT status) ---
+    Serial.println("──────────── VITALS ────────────");
+    Serial.print("  Motion:  mag=");
+    Serial.print(dataPacket.motionMagnitude, 4);
+    Serial.print("  detected=");
+    Serial.println(dataPacket.motionDetected ? "YES" : "no");
+
+    Serial.print("  Heart:   bpm=");
+    Serial.print(dataPacket.heartRateAvg, 1);
+    Serial.print("  finger=");
+    Serial.print(dataPacket.fingerDetected ? "YES" : "no");
+    Serial.print("  valid=");
+    Serial.println(dataPacket.heartRateValid ? "YES" : "no");
+
+    Serial.print("  Env:     temp=");
+    Serial.print(dataPacket.temperatureAvg, 1);
+    Serial.print("°C  humidity=");
+    Serial.print(dataPacket.humidityAvg, 1);
+    Serial.print("%  valid=");
+    Serial.println(dataPacket.envValid ? "YES" : "no");
+
+    Serial.print("  Sensors: MPU=");
+    Serial.print(mpuReady ? "OK" : "FAIL");
+    Serial.print("  BME=");
+    Serial.print(bmeReady ? "OK" : "FAIL");
+    Serial.print("  MAX=");
+    Serial.println(maxReady ? "OK" : "FAIL");
+    Serial.println("────────────────────────────────");
+
     String statusPayload = buildStatusPayload();
     if (publishMessage(statusPayload)) {
       Serial.println("[MQTT] Published vitals");
@@ -698,34 +830,52 @@ void runVAD() {
   }
 
   bool ok = readI2SSamplesRaw(vadFrame, VAD_FRAME_SAMPLES);
-  xSemaphoreGive(i2sMutex);
-
   if (!ok) {
+    xSemaphoreGive(i2sMutex);
     Serial.println("[VAD] I2S read failed");
     return;
   }
 
+  writeCircularBuffer(vadFrame, VAD_FRAME_SAMPLES);
+  xSemaphoreGive(i2sMutex);
+
   float energy = computeEnergy(vadFrame, VAD_FRAME_SAMPLES);
   int zcr = computeZCR(vadFrame, VAD_FRAME_SAMPLES);
+  int16_t peak = 0;
+  for (size_t i = 0; i < VAD_FRAME_SAMPLES; i++) {
+    int16_t absVal = abs(vadFrame[i]);
+    if (absVal > peak) {
+      peak = absVal;
+    }
+  }
 
-  Serial.print("[VAD] Energy=");
-  Serial.print(energy, 1);
-  Serial.print(" ZCR=");
-  Serial.println(zcr);
+  static unsigned long lastVadLog = 0;
+  if (millis() - lastVadLog > 500) {
+    lastVadLog = millis();
+    Serial.print("[VAD] Energy=");
+    Serial.print(energy, 1);
+    Serial.print(" ZCR=");
+    Serial.print(zcr);
+    Serial.print(" Count=");
+    Serial.println(cryCount);
+  }
 
-  bool cryFrame = (energy > ENERGY_THRESHOLD) && (zcr >= ZCR_MIN && zcr <= ZCR_MAX);
+  bool cryFrame = (energy > ENERGY_THRESHOLD) &&
+                  (zcr >= ZCR_MIN && zcr <= ZCR_MAX) &&
+                  (peak > PEAK_THRESHOLD);
   if (cryFrame) {
     cryCount++;
   } else if (cryCount > 0) {
     cryCount--;
   }
 
-  Serial.print("[VAD] Cry count=");
-  Serial.println(cryCount);
-
-  if (cryCount >= CRY_COUNT_TRIGGER && !audioCaptureInProgress) {
+  if (cryCount >= CRY_COUNT_TRIGGER &&
+      (millis() - lastCryTrigger) > CRY_COOLDOWN_MS &&
+      !audioCaptureInProgress &&
+      !audioUploadInProgress) {
     Serial.println("[VAD] Cry detected");
     cryCount = 0;
+    lastCryTrigger = millis();
     audioCaptureInProgress = true;
 
     BaseType_t created = xTaskCreatePinnedToCore(
@@ -734,7 +884,7 @@ void runVAD() {
       8192,
       nullptr,
       1,
-      &audioTaskHandle,
+      &audioCaptureTaskHandle,
       1
     );
 
@@ -747,14 +897,14 @@ void runVAD() {
 
 void audioCaptureTask(void* param) {
   (void)param;
-  if (!audioCaptureBuffer || !i2sMutex) {
+  if (!audioClipBuffer || !i2sMutex) {
     Serial.println("[AUDIO] Buffer or mutex missing");
     audioCaptureInProgress = false;
     vTaskDelete(nullptr);
     return;
   }
 
-  Serial.println("[AUDIO] Capturing 3 sec");
+  Serial.println("[AUDIO] Preparing 3 sec clip");
   if (xSemaphoreTake(i2sMutex, portMAX_DELAY) != pdTRUE) {
     Serial.println("[AUDIO] Failed to lock I2S");
     audioCaptureInProgress = false;
@@ -762,23 +912,75 @@ void audioCaptureTask(void* param) {
     return;
   }
 
-  bool ok = readI2SSamplesRaw(audioCaptureBuffer, FULL_AUDIO_SAMPLES);
-  xSemaphoreGive(i2sMutex);
-
-  if (!ok) {
-    Serial.println("[AUDIO] Capture failed");
+  if (!audioClipMutex || xSemaphoreTake(audioClipMutex, portMAX_DELAY) != pdTRUE) {
+    Serial.println("[AUDIO] Failed to lock clip buffer");
+    xSemaphoreGive(i2sMutex);
     audioCaptureInProgress = false;
     vTaskDelete(nullptr);
     return;
   }
 
-  if (uploadAudioHTTP(audioCaptureBuffer, FULL_AUDIO_SAMPLES)) {
+  extractBufferedAudio(audioClipBuffer, PRE_TRIGGER_SAMPLES);
+  bool ok = captureFutureAudio(audioClipBuffer + PRE_TRIGGER_SAMPLES, POST_TRIGGER_SAMPLES);
+  if (ok) {
+    writeCircularBuffer(audioClipBuffer + PRE_TRIGGER_SAMPLES, POST_TRIGGER_SAMPLES);
+  }
+  xSemaphoreGive(audioClipMutex);
+  xSemaphoreGive(i2sMutex);
+
+  if (!ok) {
+    Serial.println("[AUDIO] Future capture failed");
+    audioCaptureInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  audioUploadInProgress = true;
+  BaseType_t created = xTaskCreatePinnedToCore(
+    audioUploadTask,
+    "audioUploadTask",
+    8192,
+    nullptr,
+    1,
+    &audioUploadTaskHandle,
+    1
+  );
+
+  if (created != pdPASS) {
+    Serial.println("[HTTP] Upload task create failed");
+    audioUploadInProgress = false;
+  }
+
+  audioCaptureInProgress = false;
+  vTaskDelete(nullptr);
+}
+
+void audioUploadTask(void* param) {
+  (void)param;
+  if (!audioClipBuffer) {
+    Serial.println("[HTTP] Clip buffer missing");
+    audioUploadInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  if (!audioClipMutex || xSemaphoreTake(audioClipMutex, portMAX_DELAY) != pdTRUE) {
+    Serial.println("[HTTP] Failed to lock clip buffer");
+    audioUploadInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  if (uploadAudioHTTP(audioClipBuffer, FULL_AUDIO_SAMPLES)) {
     Serial.println("[HTTP] Upload success");
   } else {
     Serial.println("[HTTP] Upload failed");
   }
 
-  audioCaptureInProgress = false;
+  xSemaphoreGive(audioClipMutex);
+
+  Serial.println("[HTTP] Upload task exit");
+  audioUploadInProgress = false;
   vTaskDelete(nullptr);
 }
 
@@ -861,6 +1063,63 @@ bool readI2SSamplesRaw(int16_t* dest, size_t sampleCount) {
   }
 
   return true;
+}
+
+void writeCircularBuffer(const int16_t* samples, size_t sampleCount) {
+  if (!samples || !circularBuffer || sampleCount == 0) return;
+
+  size_t remaining = sampleCount;
+  size_t offset = 0;
+  while (remaining > 0) {
+    size_t space = FULL_AUDIO_SAMPLES - circularWriteIndex;
+    size_t chunk = (remaining < space) ? remaining : space;
+    memcpy(&circularBuffer[circularWriteIndex], &samples[offset], chunk * sizeof(int16_t));
+    circularWriteIndex = (circularWriteIndex + chunk) % FULL_AUDIO_SAMPLES;
+    offset += chunk;
+    remaining -= chunk;
+  }
+
+  if (circularSamplesWritten < FULL_AUDIO_SAMPLES) {
+    circularSamplesWritten += sampleCount;
+    if (circularSamplesWritten > FULL_AUDIO_SAMPLES) {
+      circularSamplesWritten = FULL_AUDIO_SAMPLES;
+    }
+  }
+}
+
+void extractBufferedAudio(int16_t* dest, size_t sampleCount) {
+  if (!dest || !circularBuffer || sampleCount == 0) return;
+
+  size_t available = circularSamplesWritten;
+  if (available > sampleCount) {
+    available = sampleCount;
+  }
+
+  size_t missing = sampleCount - available;
+  if (missing > 0) {
+    memset(dest, 0, missing * sizeof(int16_t));
+  }
+
+  if (available == 0) {
+    return;
+  }
+
+  size_t startIndex = (circularWriteIndex + FULL_AUDIO_SAMPLES - available) % FULL_AUDIO_SAMPLES;
+  size_t firstChunk = FULL_AUDIO_SAMPLES - startIndex;
+  if (firstChunk > available) {
+    firstChunk = available;
+  }
+
+  memcpy(dest + missing, &circularBuffer[startIndex], firstChunk * sizeof(int16_t));
+  size_t remaining = available - firstChunk;
+  if (remaining > 0) {
+    memcpy(dest + missing + firstChunk, &circularBuffer[0], remaining * sizeof(int16_t));
+  }
+}
+
+bool captureFutureAudio(int16_t* dest, size_t sampleCount) {
+  if (!dest || sampleCount == 0) return false;
+  return readI2SSamplesRaw(dest, sampleCount);
 }
 
 bool uploadAudioHTTP(const int16_t* pcm, size_t sampleCount) {
