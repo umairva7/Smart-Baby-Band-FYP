@@ -30,8 +30,8 @@ The objective is to assist parents in understanding baby needs through intellige
 2. ESP32 processes signals and formats data packets.
 3. Data is transmitted securely via MQTT over WiFi to AWS IoT Core.
 4. AWS Lambda bridges sensor data to Firebase Firestore for storage and real-time syncing.
-5. AI models classify cry type and estimate sleep stage.
-6. Mobile application displays insights, alerts, and reports.
+5. FastAPI backend runs sliding-window statistical analysis for sleep and executes Keras/TFLite models for cry classification.
+6. Mobile application streams insights via Firestore/RTDB and receives real-time FCM Push Notifications for alerts.
 
 This architecture ensures low latency, secure communication, and scalability.
 
@@ -91,8 +91,8 @@ This architecture ensures low latency, secure communication, and scalability.
 
 * **AWS IoT Core**: Cloud MQTT broker for IoT devices
 * **AWS Lambda**: Serverless bridge between AWS IoT and Firebase
-* **Firebase (Firestore + Auth)**: Real-time database and secure user authentication
-* **FastAPI (Python)**: Core backend server for ML inference, analytics, and reporting
+* **Firebase (Firestore + RTDB + FCM)**: Real-time database for streams, and Cloud Messaging for emergency push notifications
+* **FastAPI (Python)**: Core backend server handling sliding-window telemetry buffers, ML inference (Keras/TFLite), safety classification, and alerting
 
 ### Cloud Capabilities
 
@@ -108,12 +108,10 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ### Key Features
 
-* Live sensor readings
-* Cry type notifications
-* Sleep tracking graphs
-* Temperature alerts
-* Weekly health summaries
-* Secure authentication system
+* Live sensor readings via Firebase Real-Time Database (RTDB) and Firestore streams
+* Real-time FCM Push Notifications for cry detection and environment danger
+* Dynamic Sleep tracking and Environment dashboards using `StreamBuilder`
+* Secure authentication system with dynamic `device_id` resolution for multi-user mapping
 
 The mobile application acts as the primary user interface for parents.
 
