@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'services/firestore_service.dart';
+import 'globals.dart';
 
 class TemperaturePage extends StatelessWidget {
   const TemperaturePage({super.key});
@@ -8,30 +10,48 @@ class TemperaturePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Temperature Gauge
-            _buildTemperatureGauge(),
-            const SizedBox(height: 20),
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Text('Error loading data: ${snapshot.error}');
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Text('No data yet');
+          }
 
-            // Temperature Trend Area Chart
-            _buildTemperatureAreaChart(),
-            const SizedBox(height: 20),
+          final data = snapshot.data!;
+          final latest = data.first;
+          final double currentTemp = (latest['temperature'] ?? 36.5).toDouble();
 
-            // Temperature Heat Map (Weekly)
-            _buildTemperatureHeatMap(),
-            const SizedBox(height: 20),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Temperature Gauge
+              _buildTemperatureGauge(currentTemp),
+              const SizedBox(height: 20),
 
-            // Temperature Statistics
-            _buildTemperatureStats(),
-        ],
+              // Temperature Trend Area Chart
+              _buildTemperatureAreaChart(),
+              const SizedBox(height: 20),
+
+              // Temperature Heat Map (Weekly)
+              _buildTemperatureHeatMap(),
+              const SizedBox(height: 20),
+
+              // Temperature Statistics
+              _buildTemperatureStats(),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildTemperatureGauge() {
-    double currentTemp = 36.8;
+  Widget _buildTemperatureGauge(double currentTemp) {
     double minTemp = 35.0;
     double maxTemp = 38.0;
     double tempPercentage = (currentTemp - minTemp) / (maxTemp - minTemp);

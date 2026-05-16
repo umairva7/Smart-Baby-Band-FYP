@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'core/theme/app_colors.dart';
+import 'services/firestore_service.dart';
+import 'globals.dart';
 
 class CryPage extends StatelessWidget {
   const CryPage({super.key});
@@ -340,39 +342,6 @@ class CryPage extends StatelessWidget {
   }
 
   Widget _buildRecentCries(BuildContext context) {
-    final List<Map<String, dynamic>> recentCries = [
-      {
-        'time': '2:30 PM',
-        'reason': 'Hunger',
-        'duration': '4:12',
-        'intensity': 85
-      },
-      {
-        'time': '11:45 AM',
-        'reason': 'Sleepy',
-        'duration': '3:45',
-        'intensity': 60
-      },
-      {
-        'time': '9:15 AM',
-        'reason': 'Discomfort',
-        'duration': '5:20',
-        'intensity': 90
-      },
-      {
-        'time': '6:30 AM',
-        'reason': 'Hunger',
-        'duration': '3:55',
-        'intensity': 75
-      },
-      {
-        'time': '1:15 AM',
-        'reason': 'Need Burping',
-        'duration': '2:30',
-        'intensity': 45
-      },
-    ];
-
     return Card(
       elevation: 3,
       child: Padding(
@@ -388,62 +357,98 @@ class CryPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            Column(
-              children: recentCries.map((cry) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _getReasonColor(cry['reason'] as String)
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          _getReasonIcon(cry['reason'] as String),
-                          color: _getReasonColor(cry['reason'] as String),
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              cry['reason'] as String,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              'Duration: ${cry['duration']} min',
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: FirestoreService.getCryEvents(globalDeviceId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text('Error loading data: ${snapshot.error}'),
+                  );
+                }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('No data yet'),
+                  );
+                }
+
+                return Column(
+                  children: snapshot.data!.map((cry) {
+                    final reason = cry['cry_type'] ?? 'Unknown';
+                    
+                    String timeStr = '--:--';
+                    final ts = cry['timestamp'];
+                    if (ts != null) {
+                      DateTime dt;
+                      if (ts is int) {
+                        dt = DateTime.fromMillisecondsSinceEpoch(ts);
+                      } else {
+                        // Assuming Timestamp from cloud_firestore
+                        dt = ts.toDate();
+                      }
+                      timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                    }
+
+                    final confidenceVal = cry['confidence'];
+                    int confidence = 0;
+                    if (confidenceVal is double) {
+                      confidence = (confidenceVal * 100).toInt();
+                    } else if (confidenceVal is int) {
+                      confidence = confidenceVal;
+                    }
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
                         children: [
-                          Text(cry['time'] as String),
-                          Text(
-                            '${cry['intensity']}% intensity',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  _getIntensityColor(cry['intensity'] as int),
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: _getReasonColor(reason).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
                             ),
+                            child: Icon(
+                              _getReasonIcon(reason),
+                              color: _getReasonColor(reason),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  reason.toString().toUpperCase(),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(timeStr),
+                              Text(
+                                '$confidence% confidence',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: _getIntensityColor(confidence),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    );
+                  }).toList(),
                 );
-              }).toList(),
+              },
             ),
           ],
         ),
@@ -452,14 +457,14 @@ class CryPage extends StatelessWidget {
   }
 
   Color _getReasonColor(String reason) {
-    switch (reason) {
-      case 'Hunger':
+    switch (reason.toLowerCase()) {
+      case 'hungry':
         return Colors.orange;
-      case 'Sleepy':
+      case 'tired':
         return Colors.blue;
-      case 'Discomfort':
+      case 'discomfort':
         return Colors.red;
-      case 'Need Burping':
+      case 'diaper':
         return Colors.green;
       default:
         return Colors.grey;
@@ -473,15 +478,15 @@ class CryPage extends StatelessWidget {
   }
 
   IconData _getReasonIcon(String reason) {
-    switch (reason) {
-      case 'Hunger':
+    switch (reason.toLowerCase()) {
+      case 'hungry':
         return Icons.local_dining;
-      case 'Sleepy':
+      case 'tired':
         return Icons.bedtime;
-      case 'Discomfort':
+      case 'discomfort':
         return Icons.sick;
-      case 'Need Burping':
-        return Icons.airline_seat_flat;
+      case 'diaper':
+        return Icons.baby_changing_station;
       default:
         return Icons.help;
     }

@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dash.dart';
 import 'signup.dart';
 import 'services/fcm_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'globals.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -35,6 +37,17 @@ class _LoginPageState extends State<LoginPage> {
       if (credential.user != null) {
         // 2. Initialize FCM — requests permission, saves token to Firestore
         await FcmService.initialize();
+
+        // Resolve device_id
+        final user_id = FirebaseAuth.instance.currentUser!.uid;
+        final docs = await FirebaseFirestore.instance
+            .collection('baby_profiles')
+            .where('user_id', isEqualTo: user_id)
+            .limit(1)
+            .get();
+        if (docs.docs.isNotEmpty) {
+          globalDeviceId = docs.docs.first.id;
+        }
 
         if (mounted) {
           // 3. Navigate to dashboard

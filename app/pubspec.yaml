@@ -17,7 +17,8 @@ dependencies:
   firebase_messaging: ^15.2.5
   image_picker: ^1.2.2
   firebase_storage: ^12.4.10
- 
+  http: ^1.2.0
+  firebase_database: ^11.4.1
 
 dev_dependencies:
   flutter_test:

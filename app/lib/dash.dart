@@ -6,6 +6,8 @@ import 'history.dart';
 import 'notification.dart';
 import 'settings.dart';
 import 'navigation.dart';
+import 'services/firestore_service.dart';
+import 'globals.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -118,16 +120,63 @@ class _DashboardContent extends StatelessWidget {
               _buildSectionCard(
                 context,
                 title: 'Cry Classification',
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _cryTypeCard(context, 'images/hunger.jpg', 'Hunger',
-                        AppColors.chartOrange),
-                    _cryTypeCard(context, 'images/sleep.jpeg', 'Deep',
-                        AppColors.chartIndigo),
-                    _cryTypeCard(context, 'images/cry.jpeg', 'Pain',
-                        AppColors.chartRed),
-                  ],
+                child: StreamBuilder<Map<String, dynamic>?>(
+                  stream: FirestoreService.getCryClassifications(globalDeviceId),
+                  builder: (context, crySnap) {
+                    String cryType = 'unknown';
+                    if (crySnap.hasData && crySnap.data != null) {
+                      cryType = crySnap.data!['cry_label'] ?? 'unknown';
+                    }
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _cryTypeCard(
+                            context,
+                            'images/hunger.jpg',
+                            'Hunger',
+                            cryType == 'hungry' ? AppColors.chartOrange : Colors.grey),
+                        _cryTypeCard(
+                            context,
+                            'images/sleep.jpeg',
+                            'Deep',
+                            cryType == 'tired' ? AppColors.chartIndigo : Colors.grey), // tired = deep/sleepy
+                        _cryTypeCard(
+                            context,
+                            'images/cry.jpeg',
+                            'Pain',
+                            cryType == 'discomfort' ? AppColors.chartRed : Colors.grey),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              
+              // Sleep State Section
+              _buildSectionCard(
+                context,
+                title: 'Current Sleep State',
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: FirestoreService.getSleepSessions(globalDeviceId),
+                  builder: (context, sleepSnap) {
+                    String sleepState = 'Loading...';
+                    if (sleepSnap.hasData && sleepSnap.data!.isNotEmpty) {
+                      sleepState = sleepSnap.data!.first['sleep_state'] ?? 'awake';
+                    } else if (sleepSnap.hasData && sleepSnap.data!.isEmpty) {
+                      sleepState = 'No data';
+                    }
+                    return Center(
+                      child: Text(
+                        sleepState.toUpperCase(),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: sleepState == 'deep' ? AppColors.chartIndigo : 
+                                 sleepState == 'light' ? AppColors.chartBlue : AppColors.chartOrange,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
 
@@ -137,12 +186,28 @@ class _DashboardContent extends StatelessWidget {
               _buildSectionCard(
                 context,
                 title: 'Environment Temperature',
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _tempCard(context, '22.5℃', AppColors.chartBlue),
-                    _tempCard(context, '55%', AppColors.chartTeal),
-                  ],
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
+                  builder: (context, envSnap) {
+                    String temp = '--℃';
+                    String hum = '--%';
+                    Color tempColor = AppColors.chartBlue;
+                    if (envSnap.hasData && envSnap.data!.isNotEmpty) {
+                      final latest = envSnap.data!.first;
+                      temp = '${latest['temperature']}℃';
+                      hum = '${latest['humidity']}%';
+                      if (latest['overall'] == 'danger') tempColor = AppColors.error;
+                      else if (latest['overall'] == 'warning') tempColor = AppColors.chartOrange;
+                      else tempColor = AppColors.chartTeal;
+                    }
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _tempCard(context, temp, tempColor),
+                        _tempCard(context, hum, AppColors.chartTeal),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
