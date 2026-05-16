@@ -34,8 +34,7 @@ const uint32_t wifi_connect_timeout_ms = 10000;
 const uint32_t mqtt_connect_timeout_ms = 5000;
 
 // Amazon Root CA
-static const char AMAZON_ROOT_CA[] PROGMEM = R"EOF(
------BEGIN CERTIFICATE-----
+static const char AMAZON_ROOT_CA[] PROGMEM = R"EOF(-----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
 ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
 b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL
@@ -58,8 +57,7 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 )EOF";
 
 // Device Certificate
-static const char DEVICE_CERT[] PROGMEM = R"KEY(
------BEGIN CERTIFICATE-----
+static const char DEVICE_CERT[] PROGMEM = R"KEY(-----BEGIN CERTIFICATE-----
 MIIDWTCCAkGgAwIBAgIUbTkZnpVvmtFewZkDwnjsVbnKvpkwDQYJKoZIhvcNAQEL
 BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
 SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI2MDQwMzE0MjQz
@@ -82,8 +80,7 @@ VR7uiAdGum0K1Fwhn1CaKp3Syxxw0bnqACHjTjhEWjV83iIr7Cs6mofdNVFy
 )KEY";
 
 // Device Private Key
-static const char DEVICE_PRIVATE_KEY[] PROGMEM = R"KEY(
------BEGIN RSA PRIVATE KEY-----
+static const char DEVICE_PRIVATE_KEY[] PROGMEM = R"KEY(-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAou/B3L4jECFVrhVjgNYV9R/sxkPX5On8UIl/zgffVXxA+ib2
 09KrXHEtSS6+8fDRc4wNHP5RDhwaPy7BMMIxtfs9NzWft4UvXabBqu65cmOqGTgB
 YZDS1imUS9Zysk5pCRw595Q3IVVVBPiM2UhWeDVnhUTjC/CUXZU6vyNLhX/ahpki
@@ -146,6 +143,7 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 #define CRY_COUNT_TRIGGER 12
 #define CRY_COOLDOWN_MS   8000
 #define PEAK_THRESHOLD    14000
+#define MOVEMENT_THRESHOLD 0.15f
 
 const unsigned long MOTION_INTERVAL = 200;
 const unsigned long ENV_INTERVAL    = 2000;
@@ -179,10 +177,13 @@ PubSubClient client(net);
 // DATA STRUCTURE
 // =========================
 struct SensorData {
-  float motionMagnitude;
+  float meanMag;
+  float varianceMag;
+  int spikeCount;
   bool motionDetected;
 
   float heartRateAvg;
+  float heartRateVariance;
   bool fingerDetected;
   bool heartRateValid;
 
@@ -243,7 +244,13 @@ float envHumiditySum = 0.0f;
 int envSampleCount = 0;
 
 float heartBpmSum = 0.0f;
+float heartBpmSumSq = 0.0f;
 int heartBpmCount = 0;
+
+float motionMagSum = 0.0f;
+float motionMagSumSq = 0.0f;
+int motionMagCount = 0;
+int motionSpikeCount = 0;
 
 // =========================
 // FUNCTION DECLARATIONS
@@ -387,11 +394,8 @@ void reconnectMQTT() {
 
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
-  // Use Google Public DNS — the Student network's DNS can't resolve
-  // AWS IoT hostnames (DNS Failed for *.iot.ap-southeast-2.amazonaws.com)
-  IPAddress dns1(8, 8, 8, 8);
-  IPAddress dns2(8, 8, 4, 4);
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, dns1, dns2);
+  // WiFi.config with INADDR_NONE sets an invalid static IP, causing connection timeouts.
+  // We'll rely on the hotspot's DHCP for IP and DNS.
   WiFi.begin(ssid, password);
 
   Serial.print("Connecting to WiFi");
@@ -403,11 +407,21 @@ void connectWiFi() {
 
   Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi connected");
+    Serial.println("WiFi connected via DHCP.");
+    
+    // Override the network-provided DNS with Google Public DNS (8.8.8.8)
+    // We do this by re-applying the DHCP-assigned IP, Gateway, and Subnet as static
+    IPAddress ip = WiFi.localIP();
+    IPAddress gw = WiFi.gatewayIP();
+    IPAddress sn = WiFi.subnetMask();
+    IPAddress dns1(8, 8, 8, 8);
+    IPAddress dns2(8, 8, 4, 4);
+    WiFi.config(ip, gw, sn, dns1, dns2);
+
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
     Serial.print("DNS: ");
-    Serial.println(WiFi.dnsIP());
+    Serial.println(WiFi.dnsIP(0));
   } else {
     Serial.print("WiFi connect timeout after ");
     Serial.print(wifi_connect_timeout_ms);
@@ -420,25 +434,26 @@ bool connectMQTT() {
   // WiFiClientSecure validates the server certificate against the system clock.
   // If time is still at epoch (1970), TLS handshake silently fails → rc=-1.
   time_t now = time(nullptr);
-  if (now < 1700000000) {
-    Serial.print("[MQTT] Clock not set (epoch=");
+  if (now < 1770000000) { // Must be after Feb 2026 because certificate was issued in April 2026
+    Serial.print("[MQTT] Clock not valid for certs (epoch=");
     Serial.print((unsigned long)now);
     Serial.println("). Retrying NTP...");
     configTime(18000, 0, "pool.ntp.org", "time.nist.gov");
     unsigned long start = millis();
-    while (time(nullptr) < 1700000000 && (millis() - start) < 10000) {
+    while (time(nullptr) < 1770000000 && (millis() - start) < 10000) {
       delay(500);
     }
     now = time(nullptr);
-    if (now < 1700000000) {
+    if (now < 1770000000) {
       Serial.println("[MQTT] NTP still failed. Skipping MQTT attempt.");
       return false;
     }
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
-    Serial.print("[MQTT] Time synced: ");
-    Serial.println(asctime(&timeinfo));
   }
+  
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+  Serial.print("[MQTT] Current Time: ");
+  Serial.print(asctime(&timeinfo));
 
   // Single non-blocking attempt (no while-loop)
   // The backoff timer in reconnectMQTT() handles retry spacing
@@ -485,10 +500,13 @@ bool publishMessage(const String& payload) {
 // INITIALIZATION
 // =========================
 void initPacket() {
-  dataPacket.motionMagnitude = 0.0f;
+  dataPacket.meanMag = 0.0f;
+  dataPacket.varianceMag = 0.0f;
+  dataPacket.spikeCount = 0;
   dataPacket.motionDetected = false;
 
   dataPacket.heartRateAvg = 0.0f;
+  dataPacket.heartRateVariance = 0.0f;
   dataPacket.fingerDetected = false;
   dataPacket.heartRateValid = false;
 
@@ -619,10 +637,24 @@ void updateAverageSnapshot() {
 
   if (heartBpmCount > 0) {
     dataPacket.heartRateAvg = heartBpmSum / heartBpmCount;
+    dataPacket.heartRateVariance = (heartBpmSumSq / heartBpmCount) - (dataPacket.heartRateAvg * dataPacket.heartRateAvg);
     dataPacket.heartRateValid = true;
   } else {
     dataPacket.heartRateAvg = 0.0f;
+    dataPacket.heartRateVariance = 0.0f;
     dataPacket.heartRateValid = false;
+  }
+
+  if (motionMagCount > 0) {
+    dataPacket.meanMag = motionMagSum / motionMagCount;
+    dataPacket.varianceMag = (motionMagSumSq / motionMagCount) - (dataPacket.meanMag * dataPacket.meanMag);
+    dataPacket.spikeCount = motionSpikeCount;
+    dataPacket.motionDetected = (motionSpikeCount > 0);
+  } else {
+    dataPacket.meanMag = 0.0f;
+    dataPacket.varianceMag = 0.0f;
+    dataPacket.spikeCount = 0;
+    dataPacket.motionDetected = false;
   }
 }
 
@@ -632,7 +664,13 @@ void resetAverageWindows() {
   envSampleCount = 0;
 
   heartBpmSum = 0.0f;
+  heartBpmSumSq = 0.0f;
   heartBpmCount = 0;
+
+  motionMagSum = 0.0f;
+  motionMagSumSq = 0.0f;
+  motionMagCount = 0;
+  motionSpikeCount = 0;
 }
 
 // =========================
@@ -665,8 +703,13 @@ void readMotionSensor() {
     motionScore = 0.0f;
   }
 
-  dataPacket.motionMagnitude = motionScore;
-  dataPacket.motionDetected = (motionScore > MOTION_THRESHOLD);
+  motionMagSum += motionScore;
+  motionMagSumSq += (motionScore * motionScore);
+  motionMagCount++;
+  
+  if (motionScore > MOVEMENT_THRESHOLD) {
+    motionSpikeCount++;
+  }
 
   motionBaseX = (MOTION_BASELINE_ALPHA * motionBaseX) + ((1.0f - MOTION_BASELINE_ALPHA) * accel_x);
   motionBaseY = (MOTION_BASELINE_ALPHA * motionBaseY) + ((1.0f - MOTION_BASELINE_ALPHA) * accel_y);
@@ -707,6 +750,7 @@ void readHeartRateSensor() {
 
   if (!dataPacket.fingerDetected) {
     heartBpmSum = 0.0f;
+    heartBpmSumSq = 0.0f;
     heartBpmCount = 0;
     lastBeatTime = 0;
     updateAverageSnapshot();
@@ -724,6 +768,7 @@ void readHeartRateSensor() {
 
         if (bpm > 40.0f && bpm < 220.0f) {
           heartBpmSum += bpm;
+          heartBpmSumSq += (bpm * bpm);
           heartBpmCount++;
         }
       }
@@ -761,13 +806,19 @@ void publishVitalsMQTT(unsigned long now) {
 
     // --- Print vitals to serial (always, regardless of MQTT status) ---
     Serial.println("──────────── VITALS ────────────");
-    Serial.print("  Motion:  mag=");
-    Serial.print(dataPacket.motionMagnitude, 4);
+    Serial.print("  Motion:  meanMag=");
+    Serial.print(dataPacket.meanMag, 4);
+    Serial.print("  varMag=");
+    Serial.print(dataPacket.varianceMag, 4);
+    Serial.print("  spikes=");
+    Serial.print(dataPacket.spikeCount);
     Serial.print("  detected=");
     Serial.println(dataPacket.motionDetected ? "YES" : "no");
 
     Serial.print("  Heart:   bpm=");
     Serial.print(dataPacket.heartRateAvg, 1);
+    Serial.print("  varBpm=");
+    Serial.print(dataPacket.heartRateVariance, 1);
     Serial.print("  finger=");
     Serial.print(dataPacket.fingerDetected ? "YES" : "no");
     Serial.print("  valid=");
@@ -995,12 +1046,15 @@ String buildStatusPayload() {
   json += ",\"avgWindowSec\":10";
 
   json += ",\"motion\":{";
-  json += "\"magnitude\":" + String(dataPacket.motionMagnitude, 4);
+  json += "\"meanMag\":" + String(dataPacket.meanMag, 4);
+  json += ",\"varianceMag\":" + String(dataPacket.varianceMag, 4);
+  json += ",\"spikeCount\":" + String(dataPacket.spikeCount);
   json += ",\"detected\":" + String(dataPacket.motionDetected ? "true" : "false");
   json += "}";
 
   json += ",\"heart\":{";
   json += "\"bpm\":" + String(dataPacket.heartRateAvg, 2);
+  json += ",\"varianceBpm\":" + String(dataPacket.heartRateVariance, 2);
   json += ",\"fingerDetected\":" + String(dataPacket.fingerDetected ? "true" : "false");
   json += ",\"valid\":" + String(dataPacket.heartRateValid ? "true" : "false");
   json += "}";

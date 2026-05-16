@@ -20,7 +20,7 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 - Run a lightweight VAD gate on the ESP32-S3 (cry vs. no-cry)
 - Maintain a 3-second circular PCM buffer in PSRAM (2 s pre + 1 s post)
 - Upload raw int16 PCM clips to the cloud over HTTP
-- Publish heart rate, temperature, and motion via MQTT over TLS
+- Publish 10-second windowed aggregates (mean, variance, spikes) for vitals via MQTT over TLS
 - Keep sensor and MQTT loops responsive using FreeRTOS tasks
 
 ---
@@ -131,11 +131,14 @@ Vitals are published periodically to AWS IoT Core on topic `babyband/01/data`:
   "event": "sensor_status",
   "avgWindowSec": 10,
   "motion": {
-    "magnitude": 0.0123,
+    "meanMag": 0.0123,
+    "varianceMag": 0.0002,
+    "spikeCount": 0,
     "detected": false
   },
   "heart": {
     "bpm": 124.5,
+    "varianceBpm": 2.1,
     "fingerDetected": true,
     "valid": true
   },
@@ -196,11 +199,12 @@ The 3-second clip is composed of the **last 2 seconds in the ring buffer** plus 
 
 | Challenge | Solution |
 |---|---|
-| MQTT TLS failed on boot | Added NTP time sync before TLS connect |
+| MQTT TLS failed on boot | Forced strict NTP sync (UTC+5) with 20s timeout before TLS connect |
 | Audio capture blocked MQTT | Ring buffer + async capture/upload tasks |
+| MQTT reconnect froze main loop | Implemented non-blocking single-attempt connect with 15s backoff |
 | False positives in VAD | Energy + ZCR + peak + cooldown |
 | Limited RAM | 3-second PCM buffers in PSRAM |
-| DNS resolution failures | Force DNS servers and log resolution |
+| DNS resolution failures | Bypass restrictive networks using Google Public DNS (8.8.8.8) |
 
 ---
 
