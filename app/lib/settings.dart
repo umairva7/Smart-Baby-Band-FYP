@@ -663,9 +663,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   final user = FirebaseAuth.instance.currentUser;
                   if (user != null) {
                     // 1. Delete the FCM token so this device stops receiving push notifications
-                    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+                    // We don't await this so that it doesn't hang if there's no internet
+                    FirebaseFirestore.instance.collection('users').doc(user.uid).update({
                       'fcm_token': FieldValue.delete(),
-                    });
+                    }).catchError((e) => debugPrint('FCM token deletion error: $e'));
                     
                     // 2. Sign out of Firebase
                     await FirebaseAuth.instance.signOut();
@@ -737,10 +738,10 @@ class _SettingsPageState extends State<SettingsPage> {
               onPressed: () async {
                 final user = FirebaseAuth.instance.currentUser;
                 if (user != null) {
-                  await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+                  await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
                     'name': nameController.text.trim(),
                     'baby_name': babyNameController.text.trim(),
-                  });
+                  }, SetOptions(merge: true));
                 }
                 if (context.mounted) Navigator.pop(context);
               },
