@@ -98,13 +98,19 @@ class CryService:
             raise Exception(f"Failed to parse audio bytes: {e}")
 
         # Extract features using temporary wav file
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            sf.write(tmp.name, audio_data, 16000)
-            tmp.close()
-            try:
-                spectrogram = extract_features(tmp.name)
-            finally:
-                os.remove(tmp.name)
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_name = tmp.name
+        tmp.close() # Close immediately so we can write/read by name without lock issues
+        
+        try:
+            sf.write(tmp_name, audio_data, 16000)
+            spectrogram = extract_features(tmp_name)
+        finally:
+            if os.path.exists(tmp_name):
+                try:
+                    os.remove(tmp_name)
+                except Exception:
+                    pass
 
         # Run Inference -> Add batch dimension (1, 128, 128, 1)
         input_batch = np.expand_dims(spectrogram, axis=0)
