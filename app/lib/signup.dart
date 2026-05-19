@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart'; 
 import 'dash.dart';
 import 'services/fcm_service.dart';
+import 'globals.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -19,6 +20,7 @@ class _SignupPageState extends State<SignupPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
   final TextEditingController babyNameController = TextEditingController();
+  final TextEditingController deviceIdController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController confirmPasswordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -85,6 +87,18 @@ class _SignupPageState extends State<SignupPage> {
           'created_at': FieldValue.serverTimestamp(),
         });
 
+        // 3.5 Create Baby Profile Document
+        final deviceId = deviceIdController.text.trim();
+        await FirebaseFirestore.instance.collection('baby_profiles').doc(deviceId).set({
+          'user_id': user.uid,
+          'name': babyNameController.text.trim(),
+          'device_id': deviceId,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+        
+        // Update the global state so the dashboard loads immediately
+        globalDeviceId = deviceId;
+
         // 4. Initialize FCM
         await FcmService.initialize();
 
@@ -121,6 +135,7 @@ class _SignupPageState extends State<SignupPage> {
     emailController.dispose();
     phoneController.dispose();
     babyNameController.dispose();
+    deviceIdController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
     super.dispose();
@@ -263,6 +278,19 @@ class _SignupPageState extends State<SignupPage> {
                     decoration: const InputDecoration(
                       labelText: 'Baby\'s Name',
                       prefixIcon: Icon(Icons.child_care_rounded),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Device ID field
+                  TextFormField(
+                    controller: deviceIdController,
+                    keyboardType: TextInputType.text,
+                    validator: (value) => value!.isEmpty ? 'Device ID is required' : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Device ID (e.g. babyband_01)',
+                      prefixIcon: Icon(Icons.watch_rounded),
                     ),
                   ),
 

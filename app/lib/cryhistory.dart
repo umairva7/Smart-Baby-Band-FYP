@@ -7,8 +7,13 @@ import 'globals.dart';
 class CryPage extends StatelessWidget {
   const CryPage({super.key});
 
-  @override
   Widget build(BuildContext context) {
+    if (globalDeviceId.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('Device not linked. Please configure a baby profile.')),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(

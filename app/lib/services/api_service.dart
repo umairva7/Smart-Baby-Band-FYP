@@ -43,6 +43,7 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>?> getAlerts(String deviceId) async {
+    if (deviceId.isEmpty) return null;
     try {
       final response = await http.get(
         Uri.parse('$BASE_URL/alerts/?device_id=$deviceId'),

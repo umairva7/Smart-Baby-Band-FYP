@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
+// AWS REMOVED: #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <HTTPClient.h>
 #include "driver/i2s.h"
@@ -24,16 +24,17 @@
 const char* ssid = "Note 10";
 const char* password = "23456789";
 
-const char* mqtt_server = "a36ya5skrm71sd-ats.iot.ap-southeast-2.amazonaws.com";
-const int mqtt_port = 8883;
-const char* mqtt_client_id = "babyband_01";
+const char* mqtt_server = "10.184.183.100";
+const int mqtt_port = 1883;
+const char* mqtt_client_id = "ESP32_001";
 const char* mqtt_topic = "babyband/01/data";
-const char* audio_post_url = "http://10.9.202.162:8000/predict";
+const char* audio_post_url = "http://10.184.183.100:8000/predict";
 const uint32_t audio_post_timeout_ms = 15000;
 const uint32_t wifi_connect_timeout_ms = 10000;
 const uint32_t mqtt_connect_timeout_ms = 5000;
 
 // Amazon Root CA
+/* AWS REMOVED: 
 static const char AMAZON_ROOT_CA[] PROGMEM = R"EOF(-----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
 ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
@@ -108,6 +109,7 @@ avK04588DicUVFxSiidvd7kftJkFdrE7kS800cwBN5fxc2mZzqAMyAz4bHv1wYOB
 +qpSVNVJbid3f9CE8/rO3KBP9Q/akZ2FhyuHDor8dZbWSdYzpGqpLg==
 -----END RSA PRIVATE KEY-----
 )KEY";
+*/
 
 // =========================
 // PIN DEFINITIONS
@@ -170,8 +172,9 @@ bool maxReady = false;
 // =========================
 // MQTT / WIFI OBJECTS
 // =========================
-WiFiClientSecure net;
-PubSubClient client(net);
+// AWS REMOVED: WiFiClientSecure net;
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 // =========================
 // DATA STRUCTURE
@@ -298,7 +301,7 @@ String buildStatusPayload();
 void setup() {
   Serial.begin(115200);
   delay(2000);
-  Serial.println("===== SMART BABY BAND AWS START =====");
+  Serial.println("===== SMART BABY BAND LOCAL MQTT START =====");
 
   initPacket();
   initI2CBus();
@@ -364,9 +367,9 @@ void setupWiFi() {
 }
 
 void setupMQTT() {
-  net.setCACert(AMAZON_ROOT_CA);
-  net.setCertificate(DEVICE_CERT);
-  net.setPrivateKey(DEVICE_PRIVATE_KEY);
+  // AWS REMOVED: net.setCACert(AMAZON_ROOT_CA);
+  // AWS REMOVED: net.setCertificate(DEVICE_CERT);
+  // AWS REMOVED: net.setPrivateKey(DEVICE_PRIVATE_KEY);
 
   client.setServer(mqtt_server, mqtt_port);
   client.setBufferSize(1024);
@@ -431,9 +434,9 @@ void connectWiFi() {
 
 bool connectMQTT() {
   // --- Verify system time before TLS ---
+  /* AWS REMOVED: TLS Time Check
   // WiFiClientSecure validates the server certificate against the system clock.
   // If time is still at epoch (1970), TLS handshake silently fails → rc=-1.
-  time_t now = time(nullptr);
   if (now < 1770000000) { // Must be after Feb 2026 because certificate was issued in April 2026
     Serial.print("[MQTT] Clock not valid for certs (epoch=");
     Serial.print((unsigned long)now);
@@ -449,6 +452,8 @@ bool connectMQTT() {
       return false;
     }
   }
+  */
+  time_t now = time(nullptr);
   
   struct tm timeinfo;
   localtime_r(&now, &timeinfo);
@@ -457,7 +462,7 @@ bool connectMQTT() {
 
   // Single non-blocking attempt (no while-loop)
   // The backoff timer in reconnectMQTT() handles retry spacing
-  Serial.print("[MQTT] Connecting to AWS IoT...");
+  Serial.print("[MQTT] Connecting to Local Mosquitto Broker...");
 
   if (client.connect(mqtt_client_id)) {
     Serial.println("connected!");

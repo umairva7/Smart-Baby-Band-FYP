@@ -46,7 +46,11 @@ class _LoginPageState extends State<LoginPage> {
             .limit(1)
             .get();
         if (docs.docs.isNotEmpty) {
-          globalDeviceId = docs.docs.first.id;
+          final data = docs.docs.first.data();
+          globalDeviceId = data['device_id'] as String? ?? '';
+          debugPrint('Resolved device_id: \$globalDeviceId');
+        } else {
+          debugPrint('ERROR: No baby profile found for user_id: \$user_id');
         }
 
         if (mounted) {

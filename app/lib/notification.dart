@@ -14,11 +14,13 @@ class NotificationsPage extends StatelessWidget {
 
     return Scaffold(
       body: SafeArea(
-        child: StreamBuilder<Map<String, dynamic>?>(
+        child: globalDeviceId.isEmpty 
+          ? const Center(child: Text('Device not linked. Please configure a baby profile.'))
+          : StreamBuilder<Map<String, dynamic>?>(
           // Simple poll stream since it's an HTTP GET endpoint
           stream: Stream.periodic(const Duration(seconds: 5))
               .asyncMap((_) => ApiService.getAlerts(globalDeviceId))
-              .map((alerts) => (alerts != null && alerts.isNotEmpty) ? alerts.first : null),
+              .map((alerts) => (alerts != null && alerts.isNotEmpty) ? alerts : null),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());

@@ -8,20 +8,31 @@ class TemperaturePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Text('Error loading data: ${snapshot.error}');
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Text('No data yet');
-          }
+    if (globalDeviceId.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('Device not linked. Please configure a baby profile.')),
+      );
+    }
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Text('Error loading data: ${snapshot.error}');
+              }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return const Text('No data yet');
+              }
 
           final data = snapshot.data!;
           final latest = data.first;
@@ -48,7 +59,9 @@ class TemperaturePage extends StatelessWidget {
           );
         },
       ),
-    );
+    ),
+  ),
+);
   }
 
   Widget _buildTemperatureGauge(double currentTemp) {

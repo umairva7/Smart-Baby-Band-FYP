@@ -39,38 +39,44 @@ CRY_LABELS = ["hungry", "tired", "discomfort", "diaper"]
 class CryService:
     """Service for cry classification and event management."""
 
+    _tflite_model = None
+    _keras_model_instance = None
+
     def __init__(self):
         self.db = get_firestore_client()
         self.collection = "cry_events"
-        self._model = None
 
     def _load_model(self):
         """
         Lazy-load the TFLite model.
         Called only when classify_cry() is first used.
         """
-        if self._model is not None:
+        if CryService._tflite_model is not None:
+            self._model = CryService._tflite_model
             return
 
         settings = get_settings()
         import tensorflow as tf
         print(f"Loading ML Model from: {settings.CRY_MODEL_PATH}")
-        self._model = tf.lite.Interpreter(model_path=settings.CRY_MODEL_PATH)
-        self._model.allocate_tensors()
+        CryService._tflite_model = tf.lite.Interpreter(model_path=settings.CRY_MODEL_PATH)
+        CryService._tflite_model.allocate_tensors()
+        self._model = CryService._tflite_model
         
         self.input_details = self._model.get_input_details()
         self.output_details = self._model.get_output_details()
 
     def _load_keras_model(self):
-        """Lazy-load the Keras classification model."""
-        if hasattr(self, '_keras_model') and self._keras_model is not None:
+        """Lazy-load the Keras classification model globally."""
+        if CryService._keras_model_instance is not None:
+            self._keras_model = CryService._keras_model_instance
             return
 
         settings = get_settings()
         import tensorflow as tf
         print(f"Loading Keras Model from: {settings.KERAS_MODEL_PATH}")
         try:
-            self._keras_model = tf.keras.models.load_model(settings.KERAS_MODEL_PATH, compile=False)
+            CryService._keras_model_instance = tf.keras.models.load_model(settings.KERAS_MODEL_PATH, compile=False)
+            self._keras_model = CryService._keras_model_instance
         except Exception as e:
             print(f"Failed to load Keras model: {e}")
             self._keras_model = None
@@ -185,7 +191,7 @@ class CryService:
         # Trigger Real-Time Notification
         try:
             # 1. Fetch the baby profile to find the parent's user_id
-            baby_doc = self.db.collection("babies").document(request.baby_id).get()
+            baby_doc = self.db.collection("baby_profiles").document(request.baby_id).get()
             if baby_doc.exists:
                 user_id = baby_doc.to_dict().get("user_id")
                 

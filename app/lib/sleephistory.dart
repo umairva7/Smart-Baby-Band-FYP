@@ -8,6 +8,12 @@ class SleepPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (globalDeviceId.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('Device not linked. Please configure a baby profile.')),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: StreamBuilder<List<Map<String, dynamic>>>(
