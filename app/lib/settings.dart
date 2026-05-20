@@ -16,13 +16,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _notifications = true;
-  bool _vibration = true;
-  bool _autoSync = true;
-  bool _babyDataSharing = false;
   String _temperatureUnit = '°C';
-  String _distanceUnit = 'km';
-  String _selectedLanguage = 'English';
-  double _alertVolume = 0.8;
 
   // Alert thresholds (persisted to Firestore)
   double _hrThreshold = 150;
@@ -106,93 +100,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ]),
           const SizedBox(height: 20),
 
-          // General Settings
-          _buildSectionTitle('General Settings', colorScheme),
+          // Notifications & Display
+          _buildSectionTitle('Notifications & Display', colorScheme),
           _buildSettingCard(theme, [
             _buildSettingTile(
               theme: theme,
               colorScheme: colorScheme,
               icon: Icons.notifications_rounded,
               title: 'Push Notifications',
+              subtitle: _notifications ? 'Enabled' : 'Disabled',
               trailing: Switch(
                 value: _notifications,
                 onChanged: (value) {
                   setState(() {
                     _notifications = value;
-                  });
-                },
-              ),
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.volume_up_rounded,
-              title: 'Alert Volume',
-              subtitle: '${(_alertVolume * 100).toInt()}%',
-              trailing: SizedBox(
-                width: 120,
-                child: Slider(
-                  value: _alertVolume,
-                  onChanged: (value) {
-                    setState(() {
-                      _alertVolume = value;
-                    });
-                  },
-                  min: 0.0,
-                  max: 1.0,
-                  divisions: 10,
-                ),
-              ),
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.vibration_rounded,
-              title: 'Vibration Alerts',
-              trailing: Switch(
-                value: _vibration,
-                onChanged: (value) {
-                  setState(() {
-                    _vibration = value;
-                  });
-                },
-              ),
-            ),
-          ]),
-          const SizedBox(height: 20),
-
-          // Baby Monitor Settings
-          _buildSectionTitle('Baby Monitor Settings', colorScheme),
-          _buildSettingCard(theme, [
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.sync_rounded,
-              title: 'Auto Sync Data',
-              subtitle: 'Sync every 5 minutes',
-              trailing: Switch(
-                value: _autoSync,
-                onChanged: (value) {
-                  setState(() {
-                    _autoSync = value;
-                  });
-                },
-              ),
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.share_rounded,
-              title: 'Share Baby Data',
-              subtitle: 'With pediatrician',
-              trailing: Switch(
-                value: _babyDataSharing,
-                onChanged: (value) {
-                  setState(() {
-                    _babyDataSharing = value;
                   });
                 },
               ),
@@ -272,109 +193,6 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               onTap: () {
                 _showCrySensitivitySettings();
-              },
-            ),
-          ]),
-          const SizedBox(height: 20),
-
-          // App Settings
-          _buildSectionTitle('App Settings', colorScheme),
-          _buildSettingCard(theme, [
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.language_rounded,
-              title: 'Language',
-              subtitle: _selectedLanguage,
-              trailing: DropdownButton<String>(
-                value: _selectedLanguage,
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedLanguage = newValue!;
-                  });
-                },
-                items: <String>['English', 'Spanish', 'French', 'German']
-                    .map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                underline: Container(),
-              ),
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.straighten_rounded,
-              title: 'Distance Unit',
-              subtitle: _distanceUnit,
-              trailing: DropdownButton<String>(
-                value: _distanceUnit,
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _distanceUnit = newValue!;
-                  });
-                },
-                items: <String>['km', 'mi']
-                    .map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                underline: Container(),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 20),
-
-          // Support Section
-          _buildSectionTitle('Support', colorScheme),
-          _buildSettingCard(theme, [
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.help_outline_rounded,
-              title: 'Help & Support',
-              trailing: Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              onTap: () {
-                // Navigate to help page
-              },
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.privacy_tip_rounded,
-              title: 'Privacy Policy',
-              trailing: Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              onTap: () {
-                // Show privacy policy
-              },
-            ),
-            _buildDivider(theme),
-            _buildSettingTile(
-              theme: theme,
-              colorScheme: colorScheme,
-              icon: Icons.description_rounded,
-              title: 'Terms of Service',
-              trailing: Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              onTap: () {
-                // Show terms of service
               },
             ),
           ]),
