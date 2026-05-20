@@ -24,6 +24,52 @@ class _SettingsPageState extends State<SettingsPage> {
   String _selectedLanguage = 'English';
   double _alertVolume = 0.8;
 
+  // Alert thresholds (persisted to Firestore)
+  double _hrThreshold = 150;
+  double _tempThreshold = 37.5;
+  String _crySensitivity = 'Medium'; // Low / Medium / High
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAlertSettings();
+  }
+
+  Future<void> _loadAlertSettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        final data = doc.data() ?? {};
+        final settings = data['settings'] as Map<String, dynamic>? ?? {};
+        setState(() {
+          _hrThreshold = (settings['hr_alert_threshold'] ?? 150).toDouble();
+          _tempThreshold = (settings['temp_alert_threshold'] ?? 37.5).toDouble();
+          _crySensitivity = settings['cry_sensitivity'] ?? 'Medium';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading alert settings: $e');
+    }
+  }
+
+  Future<void> _saveAlertSettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'settings': {
+          'hr_alert_threshold': _hrThreshold,
+          'temp_alert_threshold': _tempThreshold,
+          'cry_sensitivity': _crySensitivity,
+        }
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error saving alert settings: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -186,14 +232,14 @@ class _SettingsPageState extends State<SettingsPage> {
               colorScheme: colorScheme,
               icon: Icons.warning_rounded,
               title: 'Critical Alerts',
-              subtitle: 'Heart rate > 150 BPM',
+              subtitle: 'Heart rate > ${_hrThreshold.toInt()} BPM',
               trailing: Icon(
                 Icons.arrow_forward_ios,
                 size: 16,
                 color: colorScheme.onSurfaceVariant,
               ),
               onTap: () {
-                _showAlertSettings('Critical Alerts');
+                _showHeartRateSettings();
               },
             ),
             _buildDivider(theme),
@@ -202,14 +248,14 @@ class _SettingsPageState extends State<SettingsPage> {
               colorScheme: colorScheme,
               icon: Icons.thermostat_rounded,
               title: 'Temperature Alerts',
-              subtitle: 'Above 37.5°C',
+              subtitle: 'Above ${_tempThreshold.toStringAsFixed(1)}°C',
               trailing: Icon(
                 Icons.arrow_forward_ios,
                 size: 16,
                 color: colorScheme.onSurfaceVariant,
               ),
               onTap: () {
-                _showAlertSettings('Temperature Alerts');
+                _showTemperatureSettings();
               },
             ),
             _buildDivider(theme),
@@ -218,14 +264,14 @@ class _SettingsPageState extends State<SettingsPage> {
               colorScheme: colorScheme,
               icon: Icons.mic_rounded,
               title: 'Cry Detection Sensitivity',
-              subtitle: 'Medium',
+              subtitle: _crySensitivity,
               trailing: Icon(
                 Icons.arrow_forward_ios,
                 size: 16,
                 color: colorScheme.onSurfaceVariant,
               ),
               onTap: () {
-                _showAlertSettings('Cry Detection');
+                _showCrySensitivitySettings();
               },
             ),
           ]),
@@ -629,20 +675,272 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  void _showAlertSettings(String title) {
+  void _showHeartRateSettings() {
+    double tempValue = _hrThreshold;
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(title),
-          content: const Text(
-              'Alert settings customization will be available in the next update.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final colorScheme = Theme.of(context).colorScheme;
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.favorite_rounded, color: Colors.red),
+                  SizedBox(width: 10),
+                  Text('Heart Rate Alert', style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Set the heart rate threshold. You will be notified when BPM exceeds this value.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    '${tempValue.toInt()} BPM',
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: tempValue > 180 ? Colors.red : colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Slider(
+                    value: tempValue,
+                    min: 60,
+                    max: 220,
+                    divisions: 32,
+                    label: '${tempValue.toInt()} BPM',
+                    onChanged: (value) {
+                      setDialogState(() => tempValue = value);
+                    },
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('60', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                      Text('Normal: 120-160', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                      Text('220', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    setState(() => _hrThreshold = tempValue);
+                    _saveAlertSettings();
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Heart rate alert set to ${tempValue.toInt()} BPM')),
+                    );
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showTemperatureSettings() {
+    double tempValue = _tempThreshold;
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final colorScheme = Theme.of(context).colorScheme;
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.thermostat_rounded, color: Colors.orange),
+                  SizedBox(width: 10),
+                  Text('Temperature Alert', style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Set the temperature threshold. You will be notified when temperature exceeds this value.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    '${tempValue.toStringAsFixed(1)}°C',
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: tempValue > 38.5 ? Colors.red : Colors.orange,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Slider(
+                    value: tempValue,
+                    min: 35.0,
+                    max: 40.0,
+                    divisions: 50,
+                    label: '${tempValue.toStringAsFixed(1)}°C',
+                    onChanged: (value) {
+                      setDialogState(() => tempValue = value);
+                    },
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('35.0°C', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                      Text('Normal: 36.5-37.5', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                      Text('40.0°C', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    setState(() => _tempThreshold = tempValue);
+                    _saveAlertSettings();
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Temperature alert set to ${tempValue.toStringAsFixed(1)}°C')),
+                    );
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showCrySensitivitySettings() {
+    String tempValue = _crySensitivity;
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final colorScheme = Theme.of(context).colorScheme;
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.mic_rounded, color: Colors.purple),
+                  SizedBox(width: 10),
+                  Text('Cry Sensitivity', style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Adjust how sensitive the cry detection is. Higher sensitivity means more alerts but may include false positives.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 20),
+                  ...['Low', 'Medium', 'High'].map((level) {
+                    final isSelected = tempValue == level;
+                    final descriptions = {
+                      'Low': 'Only very confident detections (>80%)',
+                      'Medium': 'Balanced detection (>60%)',
+                      'High': 'More sensitive, may have false alerts (>40%)',
+                    };
+                    final icons = {
+                      'Low': Icons.volume_mute_rounded,
+                      'Medium': Icons.volume_down_rounded,
+                      'High': Icons.volume_up_rounded,
+                    };
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: InkWell(
+                        onTap: () => setDialogState(() => tempValue = level),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? colorScheme.primary.withValues(alpha: 0.1)
+                                : colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? colorScheme.primary
+                                  : colorScheme.outlineVariant.withValues(alpha: 0.3),
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                icons[level],
+                                color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      level,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: isSelected ? colorScheme.primary : null,
+                                      ),
+                                    ),
+                                    Text(
+                                      descriptions[level]!,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isSelected)
+                                Icon(Icons.check_circle_rounded, color: colorScheme.primary),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    setState(() => _crySensitivity = tempValue);
+                    _saveAlertSettings();
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Cry sensitivity set to $tempValue')),
+                    );
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
         );
       },
     );

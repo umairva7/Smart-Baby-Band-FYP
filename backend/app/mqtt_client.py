@@ -74,11 +74,70 @@ def on_message(client, userdata, msg):
                     }
                     db_fs.collection("sensor_data").add(sensor_doc)
                     print(f"💾 Saved windowed sensor aggregates to Firestore for baby: {baby_id}")
+                    
+                    # 3. Check Alert Thresholds
+                    _check_alert_thresholds(db_fs, baby_id, device_id, heart, env)
+                    
             except Exception as inner_e:
                 print(f"❌ Error saving MQTT data to Firestore: {inner_e}")
             
     except Exception as e:
         print(f"Error processing MQTT message: {e}")
+
+def _check_alert_thresholds(db_fs, baby_id, device_id, heart, env):
+    """Check vitals against user-configured thresholds and create Firestore notifications."""
+    from datetime import datetime
+    try:
+        # Find user_id from baby_profiles
+        baby_doc = db_fs.collection("baby_profiles").document(baby_id).get()
+        if not baby_doc.exists:
+            return
+        user_id = baby_doc.to_dict().get("user_id", "")
+        if not user_id:
+            return
+
+        # Read user's alert settings
+        user_doc = db_fs.collection("users").document(user_id).get()
+        settings = {}
+        if user_doc.exists:
+            settings = user_doc.to_dict().get("settings", {})
+        
+        hr_threshold = settings.get("hr_alert_threshold", 150)
+        temp_threshold = settings.get("temp_alert_threshold", 37.5)
+
+        bpm = heart.get("bpm", 0)
+        temp = env.get("temperature", 0)
+        finger = heart.get("fingerDetected", False)
+        valid = heart.get("valid", False)
+
+        # Heart Rate Alert
+        if valid and finger and bpm > hr_threshold:
+            db_fs.collection("notifications").add({
+                "user_id": user_id,
+                "baby_id": baby_id,
+                "type": "critical",
+                "title": "⚠️ High Heart Rate Alert",
+                "message": f"Heart rate reached {bpm:.0f} BPM (threshold: {hr_threshold:.0f} BPM)",
+                "is_read": False,
+                "created_at": datetime.utcnow(),
+            })
+            print(f"🔔 Heart rate alert: {bpm:.0f} BPM > {hr_threshold:.0f}")
+
+        # Temperature Alert
+        if env.get("valid", False) and temp > temp_threshold:
+            db_fs.collection("notifications").add({
+                "user_id": user_id,
+                "baby_id": baby_id,
+                "type": "warning",
+                "title": "🌡️ High Temperature Alert",
+                "message": f"Temperature reached {temp:.1f}°C (threshold: {temp_threshold:.1f}°C)",
+                "is_read": False,
+                "created_at": datetime.utcnow(),
+            })
+            print(f"🔔 Temperature alert: {temp:.1f}°C > {temp_threshold:.1f}")
+
+    except Exception as e:
+        print(f"⚠️ Error checking alert thresholds: {e}")
 
 def start_mqtt_client():
     """

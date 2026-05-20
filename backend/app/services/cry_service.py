@@ -126,7 +126,26 @@ class CryService:
         cry_type = max(pred_dict, key=pred_dict.get)
         confidence = pred_dict[cry_type]
 
-        if confidence < 0.60:
+        # Read user's cry sensitivity setting from Firestore
+        confidence_threshold = 0.60  # default: Medium
+        try:
+            from firebase_admin import firestore as fs_admin
+            db_fs = fs_admin.client()
+            # Find user from device
+            baby_docs = db_fs.collection("baby_profiles").where("device_id", "==", device_id).limit(1).stream()
+            for baby_doc in baby_docs:
+                user_id = baby_doc.to_dict().get("user_id", "")
+                if user_id:
+                    user_doc = db_fs.collection("users").document(user_id).get()
+                    if user_doc.exists:
+                        settings = user_doc.to_dict().get("settings", {})
+                        sensitivity = settings.get("cry_sensitivity", "Medium")
+                        sensitivity_map = {"Low": 0.80, "Medium": 0.60, "High": 0.40}
+                        confidence_threshold = sensitivity_map.get(sensitivity, 0.60)
+        except Exception as e:
+            print(f"⚠️ Could not read cry sensitivity, using default: {e}")
+
+        if confidence < confidence_threshold:
             cry_type = "unknown"
 
         # Push to RTDB
