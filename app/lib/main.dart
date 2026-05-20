@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
 import 'theme_provider.dart';
+import 'globals.dart';
 import 'login.dart';
 import 'dash.dart';
 import 'history.dart';
@@ -31,6 +32,12 @@ void main() async {
   
   // Register the background message handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  
+  // Load persisted theme preference BEFORE rendering MaterialApp
+  await _themeProvider.loadThemePreference();
+  
+  // Restore persisted device ID so screens don't show "Device not linked"
+  await loadDeviceId();
   
   runApp(const MyApp());
 }

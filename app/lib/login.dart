@@ -47,7 +47,7 @@ class _LoginPageState extends State<LoginPage> {
             .get();
         if (docs.docs.isNotEmpty) {
           final data = docs.docs.first.data();
-          globalDeviceId = data['device_id'] as String? ?? '';
+          await saveDeviceId(data['device_id'] as String? ?? '');
           debugPrint('Resolved device_id: \$globalDeviceId');
         } else {
           debugPrint('ERROR: No baby profile found for user_id: \$user_id');

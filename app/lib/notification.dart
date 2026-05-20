@@ -11,11 +11,34 @@ class NotificationsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      appBar: AppBar(
+        title: Text('Notifications', style: theme.textTheme.headlineMedium),
+      ),
       body: SafeArea(
         child: globalDeviceId.isEmpty 
-          ? const Center(child: Text('Device not linked. Please configure a baby profile.'))
+          ? FutureBuilder(
+              future: loadDeviceId(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (globalDeviceId.isEmpty) {
+                  return Center(
+                    child: Text(
+                      'Device not linked. Please configure a baby profile.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  );
+                }
+                // Device ID recovered — rebuild the whole widget
+                return build(context);
+              },
+            )
           : StreamBuilder<Map<String, dynamic>?>(
           // Simple poll stream since it's an HTTP GET endpoint
           stream: Stream.periodic(const Duration(seconds: 5))
@@ -27,11 +50,41 @@ class NotificationsPage extends StatelessWidget {
             }
 
             if (snapshot.hasError) {
-              return Center(child: Text('Error loading alerts: ${snapshot.error}'));
+              return Center(
+                child: Text(
+                  'Error loading alerts: ${snapshot.error}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              );
             }
 
             if (!snapshot.hasData || snapshot.data == null) {
-              return const Center(child: Text('No active alerts. Everything is fine.'));
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 64,
+                      color: AppColors.success.withValues(alpha: 0.6),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'All Clear',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: AppColors.success,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No active alerts. Everything is fine.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              );
             }
 
             final alert = snapshot.data!;
@@ -41,16 +94,26 @@ class NotificationsPage extends StatelessWidget {
 
             return Center(
               child: Container(
-                width: 280,
+                width: 300,
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: colorScheme.surface,
-                  borderRadius: BorderRadius.circular(24),
+                  gradient: isDark
+                      ? AppColors.darkCardGradient
+                      : const LinearGradient(
+                          colors: [Colors.white, Color(0xFFFFF5F5)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.error.withValues(alpha: 0.15),
+                    width: 1,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: colorScheme.shadow,
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+                      color: AppColors.error.withValues(alpha: isDark ? 0.10 : 0.08),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
@@ -70,6 +133,10 @@ class NotificationsPage extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: AppColors.heartRateBg,
                         shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.error.withValues(alpha: 0.2),
+                          width: 2,
+                        ),
                       ),
                       child: const Icon(
                         Icons.warning_rounded,
@@ -101,7 +168,7 @@ class NotificationsPage extends StatelessWidget {
                     const SizedBox(height: 22),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
+                      child: FilledButton.icon(
                         onPressed: () {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -112,10 +179,13 @@ class NotificationsPage extends StatelessWidget {
                         },
                         icon: const Icon(Icons.phone_rounded, size: 20),
                         label: const Text('Call Doctor'),
-                        style: ElevatedButton.styleFrom(
+                        style: FilledButton.styleFrom(
                           backgroundColor: AppColors.error,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                     ),

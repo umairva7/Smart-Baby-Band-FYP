@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'core/theme/app_colors.dart';
 import 'navigation.dart';
 import 'cryhistory.dart';
 import 'sleephistory.dart';
@@ -31,17 +32,30 @@ class _HistoryPageState extends State<HistoryPage>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         title: Text("History", style: theme.textTheme.headlineMedium),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(text: "Cry"),
-            Tab(text: "Sleep"),
-            Tab(text: "Temperature"),
-            Tab(text: "Heartbeat"),
+          tabs: [
+            Tab(
+              icon: Icon(Icons.mic_rounded, size: 18, color: AppColors.chartAmber),
+              text: "Cry",
+            ),
+            Tab(
+              icon: Icon(Icons.nights_stay_rounded, size: 18, color: AppColors.chartIndigo),
+              text: "Sleep",
+            ),
+            Tab(
+              icon: Icon(Icons.thermostat_rounded, size: 18, color: AppColors.chartRed),
+              text: "Temp",
+            ),
+            Tab(
+              icon: Icon(Icons.favorite_rounded, size: 18, color: AppColors.chartPink),
+              text: "Heart",
+            ),
           ],
         ),
       ),

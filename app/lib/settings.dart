@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 import 'navigation.dart';
 import 'login.dart';
+import 'globals.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -377,17 +378,16 @@ class _SettingsPageState extends State<SettingsPage> {
           ]),
           const SizedBox(height: 30),
 
-          // Logout Button
+          // Logout Button — uses OutlinedButton (M3)
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
+            child: OutlinedButton(
               onPressed: () {
                 _showLogoutConfirmation();
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error.withValues(alpha: 0.1),
+              style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
-                elevation: 0,
+                side: BorderSide(color: AppColors.error.withValues(alpha: 0.4)),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -412,6 +412,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildProfileSection(ThemeData theme, ColorScheme colorScheme) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SizedBox.shrink();
+    final isDark = theme.brightness == Brightness.dark;
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
@@ -443,12 +444,22 @@ class _SettingsPageState extends State<SettingsPage> {
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: colorScheme.surface,
+            gradient: isDark
+                ? AppColors.darkCardGradient
+                : const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF0FDFA)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: colorScheme.primary.withValues(alpha: 0.12),
+              width: 1,
+            ),
             boxShadow: [
               BoxShadow(
                 color: colorScheme.shadow,
-                blurRadius: 10,
+                blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
             ],
@@ -536,11 +547,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSettingCard(ThemeData theme, List<Widget> children) {
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+          width: 0.5,
+        ),
         boxShadow: [
           BoxShadow(
             color: colorScheme.shadow,
@@ -655,7 +671,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: TextStyle(color: colorScheme.onSurfaceVariant),
               ),
             ),
-            ElevatedButton(
+            FilledButton(
               onPressed: () async {
                 Navigator.of(context).pop(); // close the dialog
                 
@@ -668,7 +684,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       'fcm_token': FieldValue.delete(),
                     }).catchError((e) => debugPrint('FCM token deletion error: $e'));
                     
-                    // 2. Sign out of Firebase
+                    // 2. Clear persisted device ID
+                    await clearDeviceId();
+                    
+                    // 3. Sign out of Firebase
                     await FirebaseAuth.instance.signOut();
                   }
                   
@@ -694,7 +713,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   }
                 }
               },
-              style: ElevatedButton.styleFrom(
+              style: FilledButton.styleFrom(
                 backgroundColor: AppColors.error,
                 foregroundColor: Colors.white,
               ),
@@ -734,7 +753,7 @@ class _SettingsPageState extends State<SettingsPage> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
-            ElevatedButton(
+            FilledButton(
               onPressed: () async {
                 final user = FirebaseAuth.instance.currentUser;
                 if (user != null) {
@@ -753,4 +772,3 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
-

@@ -48,6 +48,7 @@ class _DashboardContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -87,11 +88,15 @@ class _DashboardContent extends StatelessWidget {
                       shape: BoxShape.circle,
                       gradient: LinearGradient(
                         colors: [
-                          colorScheme.primary.withValues(alpha: 0.15),
-                          colorScheme.tertiary.withValues(alpha: 0.10),
+                          colorScheme.primary.withValues(alpha: 0.18),
+                          colorScheme.tertiary.withValues(alpha: 0.12),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
+                      ),
+                      border: Border.all(
+                        color: colorScheme.primary.withValues(alpha: 0.25),
+                        width: 2,
                       ),
                     ),
                     child: Icon(
@@ -116,10 +121,13 @@ class _DashboardContent extends StatelessWidget {
 
               const SizedBox(height: 28),
 
-              // Cry Classification Section
-              _buildSectionCard(
+              // Cry Classification Section — gradient card
+              _buildGradientSectionCard(
                 context,
                 title: 'Cry Classification',
+                gradient: AppColors.cryGradient(isDark),
+                accentColor: AppColors.chartAmber,
+                icon: Icons.mic_rounded,
                 child: StreamBuilder<Map<String, dynamic>?>(
                   stream: FirestoreService.getCryClassifications(globalDeviceId),
                   builder: (context, crySnap) {
@@ -139,7 +147,7 @@ class _DashboardContent extends StatelessWidget {
                             context,
                             'images/sleep.jpeg',
                             'Deep',
-                            cryType == 'tired' ? AppColors.chartIndigo : Colors.grey), // tired = deep/sleepy
+                            cryType == 'tired' ? AppColors.chartIndigo : Colors.grey),
                         _cryTypeCard(
                             context,
                             'images/cry.jpeg',
@@ -153,10 +161,13 @@ class _DashboardContent extends StatelessWidget {
 
               const SizedBox(height: 16),
               
-              // Sleep State Section
-              _buildSectionCard(
+              // Sleep State Section — gradient card
+              _buildGradientSectionCard(
                 context,
                 title: 'Current Sleep State',
+                gradient: AppColors.sleepGradient(isDark),
+                accentColor: AppColors.chartIndigo,
+                icon: Icons.nights_stay_rounded,
                 child: StreamBuilder<List<Map<String, dynamic>>>(
                   stream: FirestoreService.getSleepSessions(globalDeviceId),
                   builder: (context, sleepSnap) {
@@ -182,10 +193,13 @@ class _DashboardContent extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // Environment Temperature Section
-              _buildSectionCard(
+              // Environment Temperature Section — gradient card
+              _buildGradientSectionCard(
                 context,
                 title: 'Environment Temperature',
+                gradient: AppColors.tempGradient(isDark),
+                accentColor: AppColors.chartRed,
+                icon: Icons.thermostat_rounded,
                 child: StreamBuilder<List<Map<String, dynamic>>>(
                   stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
                   builder: (context, envSnap) {
@@ -217,31 +231,54 @@ class _DashboardContent extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionCard(
+  /// Gradient-background section card with glassmorphism-lite effect.
+  Widget _buildGradientSectionCard(
     BuildContext context, {
     required String title,
+    required LinearGradient gradient,
+    required Color accentColor,
+    required IconData icon,
     required Widget child,
   }) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: accentColor.withValues(alpha: isDark ? 0.15 : 0.10),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.shadow,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: accentColor.withValues(alpha: isDark ? 0.08 : 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.titleMedium),
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: accentColor, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Text(title, style: theme.textTheme.titleMedium),
+            ],
+          ),
           const SizedBox(height: 15),
           child,
         ],

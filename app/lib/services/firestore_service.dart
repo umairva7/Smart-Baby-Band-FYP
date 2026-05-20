@@ -35,6 +35,16 @@ class FirestoreService {
         .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
   }
 
+  static Stream<List<Map<String, dynamic>>> getSensorData(String deviceId) {
+    return _db
+        .collection('sensor_data')
+        .where('device_id', isEqualTo: deviceId)
+        .orderBy('timestamp', descending: true)
+        .limit(20)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
+  }
+
   static Stream<Map<String, dynamic>?> getBabyProfile(String deviceId) {
     return _db
         .collection('baby_profiles')

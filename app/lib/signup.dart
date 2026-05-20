@@ -97,7 +97,7 @@ class _SignupPageState extends State<SignupPage> {
         });
         
         // Update the global state so the dashboard loads immediately
-        globalDeviceId = deviceId;
+        await saveDeviceId(deviceId);
 
         // 4. Initialize FCM
         await FcmService.initialize();

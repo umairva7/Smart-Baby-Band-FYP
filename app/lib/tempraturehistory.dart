@@ -1,21 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'core/theme/app_colors.dart';
 import 'services/firestore_service.dart';
 import 'globals.dart';
 
 class TemperaturePage extends StatelessWidget {
   const TemperaturePage({super.key});
 
+  // Temperature history accent color: Red
+  static const Color _accent = AppColors.chartRed;
+
   @override
   Widget build(BuildContext context) {
-    if (globalDeviceId.isEmpty) {
-      return const Scaffold(
-        body: Center(child: Text('Device not linked. Please configure a baby profile.')),
-      );
-    }
-
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    if (globalDeviceId.isEmpty) {
+      return FutureBuilder(
+        future: loadDeviceId(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          if (globalDeviceId.isEmpty) {
+            return const Scaffold(
+              body: Center(child: Text('Device not linked. Please configure a baby profile.')),
+            );
+          }
+          // Device ID recovered — rebuild with data
+          return build(context);
+        },
+      );
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -28,10 +45,13 @@ class TemperaturePage extends StatelessWidget {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.hasError) {
-                return Text('Error loading data: ${snapshot.error}');
+                return Text('Error loading data: ${snapshot.error}',
+                  style: theme.textTheme.bodyMedium);
               }
               if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Text('No data yet');
+                return Text('No data yet', style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ));
               }
 
           final data = snapshot.data!;
@@ -42,19 +62,11 @@ class TemperaturePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Temperature Gauge
-              _buildTemperatureGauge(currentTemp),
+              _buildTemperatureGauge(theme, colorScheme, isDark, currentTemp),
               const SizedBox(height: 20),
 
-              // Temperature Trend Area Chart
-              _buildTemperatureAreaChart(),
-              const SizedBox(height: 20),
-
-              // Temperature Heat Map (Weekly)
-              _buildTemperatureHeatMap(),
-              const SizedBox(height: 20),
-
-              // Temperature Statistics
-              _buildTemperatureStats(),
+              // Temperature Trend (real Firebase data)
+              _buildTemperatureTrendChart(theme, colorScheme, isDark, data),
             ],
           );
         },
@@ -64,550 +76,253 @@ class TemperaturePage extends StatelessWidget {
 );
   }
 
-  Widget _buildTemperatureGauge(double currentTemp) {
+  Widget _buildTemperatureGauge(ThemeData theme, ColorScheme colorScheme, bool isDark, double currentTemp) {
     double minTemp = 35.0;
     double maxTemp = 38.0;
     double tempPercentage = (currentTemp - minTemp) / (maxTemp - minTemp);
 
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            const Text(
-              'Current Temperature',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 15),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppColors.tempGradient(isDark),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _accent.withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: _accent.withValues(alpha: isDark ? 0.08 : 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Current Temperature',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 15),
 
-            // Gauge Circle
-            SizedBox(
-              height: 180,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Background Circle
-                  Container(
-                    width: 180,
-                    height: 180,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.grey[300]!,
-                        width: 15,
-                      ),
+          // Gauge Circle
+          SizedBox(
+            height: 180,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Background Circle
+                Container(
+                  width: 180,
+                  height: 180,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: colorScheme.outlineVariant,
+                      width: 15,
                     ),
                   ),
+                ),
 
-                  // Temperature Arc
-                  Container(
+                // Temperature Arc — clipped to circle to hide gradient seam
+                ClipOval(
+                  child: Container(
                     width: 180,
                     height: 180,
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: SweepGradient(
                         colors: [
-                          Colors.blue,
-                          Colors.green,
-                          Colors.yellow,
-                          Colors.orange,
-                          Colors.red,
+                          Color(0xFF42A5F5),
+                          Color(0xFF66BB6A),
+                          Color(0xFFFFC107),
+                          Color(0xFFFF9800),
+                          Color(0xFFEF5350),
                         ],
-                        stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
-                        startAngle: -0.5,
-                        endAngle: 2.5,
+                        stops: [0.0, 0.25, 0.5, 0.75, 1.0],
+                        startAngle: 3.14,
+                        endAngle: 6.28,
                       ),
                     ),
                   ),
+                ),
 
-                  // Inner Circle
-                  Container(
-                    width: 150,
-                    height: 150,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Text(
-                                currentTemp.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 42,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange,
-                                ),
+                // Inner Circle
+                Container(
+                  width: 150,
+                  height: 150,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colorScheme.surface,
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              currentTemp.toStringAsFixed(1),
+                              style: theme.textTheme.displayMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: _getTempStatusColor(currentTemp),
                               ),
-                              const SizedBox(width: 5),
-                              const Text(
-                                '°C',
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  color: Colors.orange,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            _getTempStatus(currentTemp),
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: _getTempStatusColor(currentTemp),
                             ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '°C',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                color: _getTempStatusColor(currentTemp),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          _getTempStatus(currentTemp),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: _getTempStatusColor(currentTemp),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
+                ),
 
-                  // Temperature Indicator
-                  Transform.rotate(
-                    angle: (tempPercentage * 3.14) - 1.57,
-                    child: Container(
-                      width: 2,
-                      height: 90,
-                      color: Colors.black,
+                // Temperature Indicator — adjusted for bottom-arc orientation
+                Transform.rotate(
+                  angle: (tempPercentage * 3.14) + 3.14,
+                  child: Container(
+                    width: 2,
+                    height: 90,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 15),
+
+          // Temperature Range Labels
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('35°C', style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF42A5F5), fontWeight: FontWeight.w600)),
+              Text('36°C', style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF66BB6A), fontWeight: FontWeight.w600)),
+              Text('37°C', style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFFF9800), fontWeight: FontWeight.w600)),
+              Text('38°C', style: theme.textTheme.bodySmall?.copyWith(
+                color: _accent, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTemperatureTrendChart(ThemeData theme, ColorScheme colorScheme, bool isDark, List<Map<String, dynamic>> data) {
+    final recent = data.length > 10 ? data.sublist(data.length - 10) : data;
+
+    // Map entries to FlSpot — x = index, y = temperature
+    final spots = <FlSpot>[];
+    for (int i = 0; i < recent.length; i++) {
+      final temp = (recent[i]['temperature'] ?? 0).toDouble();
+      spots.add(FlSpot(i.toDouble(), temp));
+    }
+
+    if (spots.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppColors.tempGradient(isDark),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _accent.withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: _accent.withValues(alpha: isDark ? 0.08 : 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Temperature Trend', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 160,
+            child: LineChart(
+              LineChartData(
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 0.5,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 0.5,
+                      reservedSize: 40,
+                      getTitlesWidget: (value, meta) {
+                        return Text(
+                          '${value.toStringAsFixed(1)}°',
+                          style: theme.textTheme.bodySmall,
+                        );
+                      },
+                    ),
+                  ),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                borderData: FlBorderData(show: false),
+                minY: 35.0,
+                maxY: 38.5,
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    color: _accent,
+                    barWidth: 2.5,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) {
+                        return FlDotCirclePainter(
+                          radius: 3,
+                          color: _accent,
+                          strokeWidth: 0,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: _accent.withValues(alpha: 0.08),
                     ),
                   ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 15),
-
-            // Temperature Range Labels
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('35°C', style: TextStyle(color: Colors.blue[700])),
-                Text('36°C', style: TextStyle(color: Colors.green[700])),
-                Text('37°C', style: TextStyle(color: Colors.orange[700])),
-                Text('38°C', style: TextStyle(color: Colors.red[700])),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTemperatureAreaChart() {
-    final List<FlSpot> tempData = [
-      const FlSpot(0, 36.5),
-      const FlSpot(2, 36.6),
-      const FlSpot(4, 36.4),
-      const FlSpot(6, 36.7),
-      const FlSpot(8, 36.9),
-      const FlSpot(10, 37.0),
-      const FlSpot(12, 36.8),
-      const FlSpot(14, 36.7),
-      const FlSpot(16, 36.9),
-      const FlSpot(18, 37.1),
-      const FlSpot(20, 36.8),
-      const FlSpot(22, 36.6),
-      const FlSpot(24, 36.5),
-    ];
-
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '24-Hour Temperature Trend',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 200,
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(
-                    show: true,
-                    drawHorizontalLine: true,
-                    getDrawingHorizontalLine: (value) {
-                      if (value == 37.0) {
-                        return FlLine(
-                          color: Colors.red.withValues(alpha: 0.5),
-                          strokeWidth: 1,
-                          dashArray: const [5, 5],
-                        );
-                      }
-                      return FlLine(
-                        color: Colors.grey[200]!,
-                        strokeWidth: 1,
-                      );
-                    },
-                  ),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 30,
-                        getTitlesWidget: (value, meta) {
-                          List<String> times = [
-                            '12AM',
-                            '6AM',
-                            '12PM',
-                            '6PM',
-                            '12AM'
-                          ];
-                          int index = (value ~/ 6).toInt();
-                          return index >= 0 && index < times.length
-                              ? Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(times[index]),
-                                )
-                              : const SizedBox();
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            '${value.toStringAsFixed(1)}°',
-                            style: const TextStyle(fontSize: 10),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  minX: 0,
-                  maxX: 24,
-                  minY: 36.0,
-                  maxY: 37.5,
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: tempData,
-                      isCurved: true,
-                      color: Colors.transparent,
-                      barWidth: 0,
-                      isStrokeCapRound: true,
-                      belowBarData: BarAreaData(
-                        show: true,
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.orange.withValues(alpha: 0.5),
-                            Colors.orange.withValues(alpha: 0.1),
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                      ),
-                      dotData: FlDotData(
-                        show: true,
-                        getDotPainter: (spot, percent, barData, index) {
-                          return FlDotCirclePainter(
-                            radius: 3,
-                            color: Colors.orange,
-                            strokeWidth: 2,
-                            strokeColor: Colors.white,
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                  lineTouchData: LineTouchData(
-                    touchTooltipData: LineTouchTooltipData(
-                      tooltipBgColor: Colors.white,
-                      getTooltipItems: (touchedSpots) {
-                        return touchedSpots.map((spot) {
-                          return LineTooltipItem(
-                            '${spot.y.toStringAsFixed(1)}°C\n${spot.x.toInt()}:00',
-                            const TextStyle(color: Colors.black),
-                          );
-                        }).toList();
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Area chart shows temperature variations'),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'Safe Range',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTemperatureHeatMap() {
-    final List<String> days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    final List<String> times = ['AM', 'PM'];
-
-    // Simulated temperature data for heatmap
-    final List<List<double>> heatMapData = [
-      [36.5, 36.7, 36.6, 36.8, 36.9, 37.0, 36.8], // AM
-      [36.7, 36.8, 36.9, 37.0, 37.1, 36.9, 36.7], // PM
-    ];
-
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Weekly Temperature Pattern',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            // Heat Map Grid
-            Column(
-              children: [
-                // Header row (days)
-                Row(
-                  children: [
-                    const SizedBox(width: 40),
-                    ...days.map((day) => Expanded(
-                          child: Center(
-                            child: Text(
-                              day,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        )),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-
-                // Heat map rows
-                ...List.generate(2, (timeIndex) {
-                  return Row(
-                    children: [
-                      SizedBox(
-                        width: 40,
-                        child: Text(
-                          times[timeIndex],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      ...List.generate(7, (dayIndex) {
-                        double temp = heatMapData[timeIndex][dayIndex];
-                        return Expanded(
-                          child: Container(
-                            margin: const EdgeInsets.all(2),
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: _getHeatMapColor(temp),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${temp.toStringAsFixed(1)}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: temp >= 37.0
-                                      ? Colors.white
-                                      : Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  );
-                }),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-
-            // Heat Map Legend
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Heat Map Legend:'),
-                Row(
-                  children: [
-                    Container(width: 15, height: 15, color: Colors.blue),
-                    const SizedBox(width: 5),
-                    const Text('Cool', style: TextStyle(fontSize: 12)),
-                    const SizedBox(width: 10),
-                    Container(width: 15, height: 15, color: Colors.green),
-                    const SizedBox(width: 5),
-                    const Text('Normal', style: TextStyle(fontSize: 12)),
-                    const SizedBox(width: 10),
-                    Container(width: 15, height: 15, color: Colors.orange),
-                    const SizedBox(width: 5),
-                    const Text('Warm', style: TextStyle(fontSize: 12)),
-                    const SizedBox(width: 10),
-                    Container(width: 15, height: 15, color: Colors.red),
-                    const SizedBox(width: 5),
-                    const Text('Hot', style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTemperatureStats() {
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Temperature Statistics',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 15),
-
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              childAspectRatio: 2.5,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              children: [
-                _buildStatBox(
-                    'Today\'s High', '37.1°C', Icons.arrow_upward, Colors.red),
-                _buildStatBox('Today\'s Low', '36.4°C', Icons.arrow_downward,
-                    Colors.blue),
-                _buildStatBox(
-                    'Weekly Avg', '36.8°C', Icons.timeline, Colors.orange),
-                _buildStatBox(
-                    'Stability', '94%', Icons.stacked_line_chart, Colors.green),
-              ],
-            ),
-
-            const SizedBox(height: 15),
-            const Divider(),
-            const SizedBox(height: 10),
-
-            // Temperature Range Info
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Normal Range:', style: TextStyle(color: Colors.grey)),
-                    Text('36.5°C - 37.0°C',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Current Status:',
-                        style: TextStyle(color: Colors.grey)),
-                    Text('Normal',
-                        style: TextStyle(
-                            color: Colors.green, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatBox(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-                ),
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
+          const SizedBox(height: 8),
+          Text(
+            'Last ${recent.length} readings',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -616,10 +331,10 @@ class TemperaturePage extends StatelessWidget {
   }
 
   Color _getTempStatusColor(double temp) {
-    if (temp < 36.5) return Colors.blue;
-    if (temp >= 36.5 && temp <= 37.0) return Colors.green;
-    if (temp > 37.0 && temp <= 37.5) return Colors.orange;
-    return Colors.red;
+    if (temp < 36.5) return const Color(0xFF42A5F5);
+    if (temp >= 36.5 && temp <= 37.0) return AppColors.chartGreen;
+    if (temp > 37.0 && temp <= 37.5) return AppColors.chartOrange;
+    return _accent;
   }
 
   String _getTempStatus(double temp) {
@@ -627,13 +342,5 @@ class TemperaturePage extends StatelessWidget {
     if (temp >= 36.5 && temp <= 37.0) return 'Normal';
     if (temp > 37.0 && temp <= 37.5) return 'Slightly High';
     return 'High Temperature';
-  }
-
-  Color _getHeatMapColor(double temp) {
-    if (temp < 36.5) return Colors.blue[200]!;
-    if (temp >= 36.5 && temp < 36.8) return Colors.green[200]!;
-    if (temp >= 36.8 && temp < 37.0) return Colors.yellow[200]!;
-    if (temp >= 37.0 && temp < 37.2) return Colors.orange[200]!;
-    return Colors.red[200]!;
   }
 }
