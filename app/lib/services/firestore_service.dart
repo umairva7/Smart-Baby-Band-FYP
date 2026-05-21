@@ -30,7 +30,7 @@ class FirestoreService {
         .collection('environment_logs')
         .where('device_id', isEqualTo: deviceId)
         .orderBy('timestamp', descending: true)
-        .limit(20)
+        .limit(144)
         .snapshots()
         .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
   }
@@ -40,7 +40,7 @@ class FirestoreService {
         .collection('sensor_data')
         .where('device_id', isEqualTo: deviceId)
         .orderBy('timestamp', descending: true)
-        .limit(20)
+        .limit(144)
         .snapshots()
         .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
   }
@@ -71,5 +71,32 @@ class FirestoreService {
           }
           return null;
         });
+  }
+
+  static Stream<List<Map<String, dynamic>>> getNotifications(String userId) {
+    return _db
+        .collection('notifications')
+        .where('user_id', isEqualTo: userId)
+        .orderBy('created_at', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              data['id'] = doc.id;
+              return data;
+            }).toList());
+  }
+
+  static Future<void> markNotificationAsRead(String notificationId) async {
+    await _db.collection('notifications').doc(notificationId).update({'is_read': true});
+  }
+
+  static Future<void> clearAllNotifications(String userId) async {
+    final batch = _db.batch();
+    final snapshots = await _db.collection('notifications').where('user_id', isEqualTo: userId).get();
+    for (final doc in snapshots.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
   }
 }

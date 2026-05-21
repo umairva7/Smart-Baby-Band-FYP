@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'core/theme/app_colors.dart';
 import 'navigation.dart';
-import 'services/api_service.dart';
-import 'globals.dart';
+import 'services/firestore_service.dart';
 
 class NotificationsPage extends StatelessWidget {
   const NotificationsPage({super.key});
@@ -12,192 +13,250 @@ class NotificationsPage extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: Text("Please log in again.")),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Notifications', style: theme.textTheme.headlineMedium),
+        title: Text('Alerts', style: theme.textTheme.headlineMedium),
+        actions: [
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: FirestoreService.getNotifications(user.uid),
+            builder: (context, snapshot) {
+              if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+                return IconButton(
+                  icon: const Icon(Icons.delete_sweep_rounded),
+                  tooltip: 'Clear All',
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Clear All Alerts?'),
+                        content: const Text('This will delete all alert history permanentely.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (confirm == true) {
+                      await FirestoreService.clearAllNotifications(user.uid);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('All alerts cleared.')),
+                        );
+                      }
+                    }
+                  },
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ],
       ),
       body: SafeArea(
-        child: globalDeviceId.isEmpty 
-          ? FutureBuilder(
-              future: loadDeviceId(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (globalDeviceId.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'Device not linked. Please configure a baby profile.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  );
-                }
-                // Device ID recovered — rebuild the whole widget
-                return build(context);
-              },
-            )
-          : StreamBuilder<Map<String, dynamic>?>(
-          // Simple poll stream since it's an HTTP GET endpoint
-          stream: Stream.periodic(const Duration(seconds: 5))
-              .asyncMap((_) => ApiService.getAlerts(globalDeviceId))
-              .map((alerts) => (alerts != null && alerts.isNotEmpty) ? alerts : null),
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: FirestoreService.getNotifications(user.uid),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
             if (snapshot.hasError) {
               return Center(
-                child: Text(
-                  'Error loading alerts: ${snapshot.error}',
-                  style: theme.textTheme.bodyMedium,
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Text(
+                    'Error loading alerts: ${snapshot.error}',
+                    style: theme.textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               );
             }
 
-            if (!snapshot.hasData || snapshot.data == null) {
+            final notifications = snapshot.data ?? [];
+
+            if (notifications.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.check_circle_outline_rounded,
-                      size: 64,
-                      color: AppColors.success.withValues(alpha: 0.6),
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: AppColors.chartGreen.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.chartGreen.withValues(alpha: 0.2),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 64,
+                        color: AppColors.chartGreen,
+                      ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
                     Text(
                       'All Clear',
                       style: theme.textTheme.headlineSmall?.copyWith(
-                        color: AppColors.success,
+                        color: AppColors.chartGreen,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'No active alerts. Everything is fine.',
+                      'No active alerts. Your baby is completely safe!',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ),
               );
             }
 
-            final alert = snapshot.data!;
-            final type = alert['alert_type'] ?? 'Unknown';
-            final temp = alert['temperature']?.toString() ?? '--';
-            final hum = alert['humidity']?.toString() ?? '--';
+            return ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              itemCount: notifications.length,
+              itemBuilder: (context, index) {
+                final item = notifications[index];
+                final String id = item['id'] ?? '';
+                final String title = item['title'] ?? 'Alert';
+                final String message = item['message'] ?? '';
+                final String type = item['type'] ?? 'info';
+                final bool isRead = item['is_read'] ?? false;
+                
+                DateTime? time;
+                final ts = item['created_at'];
+                if (ts is Timestamp) {
+                  time = ts.toDate();
+                }
 
-            return Center(
-              child: Container(
-                width: 300,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: isDark
-                      ? AppColors.darkCardGradient
-                      : const LinearGradient(
-                          colors: [Colors.white, Color(0xFFFFF5F5)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: AppColors.error.withValues(alpha: 0.15),
-                    width: 1,
+                final Color categoryColor = type == 'critical' 
+                    ? AppColors.chartRed 
+                    : (type == 'warning' ? AppColors.chartOrange : AppColors.chartBlue);
+
+                final String timeStr = time != null 
+                    ? '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}'
+                    : '--:--';
+
+                return Dismissible(
+                  key: Key(id),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade400,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.delete_rounded, color: Colors.white),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.error.withValues(alpha: isDark ? 0.10 : 0.08),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Emergency Alert',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                  onDismissed: (direction) async {
+                    // Quick batch delete of a single doc
+                    await FirebaseFirestore.instance.collection('notifications').doc(id).delete();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isRead 
+                          ? colorScheme.surface
+                          : categoryColor.withValues(alpha: isDark ? 0.08 : 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isRead 
+                            ? colorScheme.outlineVariant.withValues(alpha: 0.5)
+                            : categoryColor.withValues(alpha: 0.25),
+                        width: isRead ? 0.5 : 1,
                       ),
+                      boxShadow: isRead ? null : [
+                        BoxShadow(
+                          color: categoryColor.withValues(alpha: isDark ? 0.05 : 0.03),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 18),
-                    Container(
-                      height: 72,
-                      width: 72,
-                      decoration: BoxDecoration(
-                        color: AppColors.heartRateBg,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.error.withValues(alpha: 0.2),
-                          width: 2,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      leading: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: categoryColor.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          type == 'critical' 
+                              ? Icons.warning_rounded 
+                              : (type == 'warning' ? Icons.thermostat_rounded : Icons.info_rounded),
+                          color: categoryColor,
+                          size: 24,
                         ),
                       ),
-                      child: const Icon(
-                        Icons.warning_rounded,
-                        color: AppColors.heartRate,
-                        size: 40,
-                      ),
-                    ),
-                    const SizedBox(height: 15),
-                    Text(
-                      type.replaceAll('_', ' ').toUpperCase(),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    Text(
-                      'Temp: $temp℃\nHum: $hum%',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      'Danger Detected',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: AppColors.error,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Calling Doctor...'),
-                              duration: Duration(seconds: 2),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: isRead ? FontWeight.w500 : FontWeight.bold,
+                                color: isRead ? colorScheme.onSurface : categoryColor,
+                              ),
                             ),
-                          );
-                        },
-                        icon: const Icon(Icons.phone_rounded, size: 20),
-                        label: const Text('Call Doctor'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          Text(
+                            timeStr,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          message,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            height: 1.3,
                           ),
                         ),
                       ),
+                      trailing: !isRead 
+                          ? IconButton(
+                              icon: const Icon(Icons.mark_chat_read_rounded, size: 20),
+                              tooltip: 'Mark as read',
+                              onPressed: () async {
+                                await FirestoreService.markNotificationAsRead(id);
+                              },
+                            )
+                          : null,
                     ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             );
           },
         ),
       ),
-
-      // navigation bar should be OUTSIDE the body
       bottomNavigationBar: const AppBottomNav(currentIndex: 2),
     );
   }
