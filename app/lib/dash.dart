@@ -133,7 +133,12 @@ class _DashboardContent extends StatelessWidget {
                   builder: (context, crySnap) {
                     String cryType = 'unknown';
                     if (crySnap.hasData && crySnap.data != null) {
-                      cryType = crySnap.data!['cry_label'] ?? 'unknown';
+                      if (crySnap.data!['cry_detected'] == false) {
+                        // Silently discard non-cry
+                        cryType = 'unknown';
+                      } else {
+                        cryType = crySnap.data!['cry_label'] ?? 'unknown';
+                      }
                     }
                     return Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,

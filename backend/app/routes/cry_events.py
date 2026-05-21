@@ -17,6 +17,18 @@ from app.services.cry_service import CryService
 
 router = APIRouter()
 
+import sys
+import os
+
+WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+if WORKSPACE_ROOT not in sys.path:
+    sys.path.append(WORKSPACE_ROOT)
+
+from ml_model.cry_detection.cloud_inference import CryDetector
+
+_CLOUD_MODEL_PATH = os.path.join(WORKSPACE_ROOT, "ml_model/cry_detection/models/cloud_detection/cry_detection_cloud.h5")
+cry_detector = CryDetector(model_path=_CLOUD_MODEL_PATH)
+
 # Expected payload: 48000 int16 samples × 2 bytes each = 96000 bytes
 EXPECTED_PCM_BYTES = 48000 * 2
 
@@ -70,10 +82,22 @@ async def predict_cry_audio(request: Request):
                    f"got {len(audio_bytes)} bytes"
         )
 
+    # --- Binary Cry Detection Gate ---
+    is_cry, confidence = cry_detector.is_cry(audio_bytes)
+    if not is_cry:
+        return {
+            "cry_detected": False,
+            "confidence": round(float(confidence), 4),
+            "label": None,
+            "message": "Audio classified as non-cry. Classification skipped."
+        }
+
     service = CryService()
 
     try:
         result = await service.predict_audio(audio_bytes)
+        result["cry_detected"] = True
+        result["detection_confidence"] = round(float(confidence), 4)
         return {"status": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
