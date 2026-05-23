@@ -291,7 +291,14 @@ class TemperaturePage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('24-Hour Temperature Trend', style: theme.textTheme.titleMedium),
+              Expanded(
+                child: Text(
+                  '24-Hour Temperature Trend',
+                  style: theme.textTheme.titleMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
