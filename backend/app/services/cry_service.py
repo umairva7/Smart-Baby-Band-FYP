@@ -154,7 +154,8 @@ class CryService:
             "device_id": device_id,
             "cry_label": cry_type,
             "confidence": confidence,
-            "all_predictions": pred_dict
+            "all_predictions": pred_dict,
+            "cry_detected": cry_type != "unknown"
         }
         
         try:
@@ -163,6 +164,48 @@ class CryService:
             print("✅ Successfully pushed prediction to Firebase RTDB")
         except Exception as e:
             print(f"Failed to push to RTDB: {e}")
+
+        # Store in Firestore cry_events & Trigger app notifications
+        try:
+            from firebase_admin import firestore as fs_admin
+            db_fs = fs_admin.client()
+            now = datetime.utcnow()
+            
+            # Save cry event to history
+            db_fs.collection("cry_events").add({
+                "baby_id": device_id,
+                "cry_type": cry_type,
+                "confidence": confidence,
+                "timestamp": now
+            })
+            print("💾 Successfully saved cry event to Firestore history")
+            
+            # Fetch baby profile to map parent user UID
+            baby_docs = db_fs.collection("baby_profiles").where("device_id", "==", device_id).limit(1).stream()
+            for baby_doc in baby_docs:
+                user_id = baby_doc.to_dict().get("user_id", "")
+                if user_id:
+                    display_names = {
+                        "hungry": "Hunger",
+                        "tired": "Tiredness",
+                        "discomfort": "Discomfort",
+                        "diaper": "Wet Diaper"
+                    }
+                    displayName = display_names.get(cry_type, "Unknown Reason")
+                    
+                    # Create Firestore notification alert
+                    db_fs.collection("notifications").add({
+                        "user_id": user_id,
+                        "baby_id": device_id,
+                        "type": "warning",
+                        "title": "🍼 Cry Detected via Server",
+                        "message": f"Server classification: {displayName} ({confidence*100:.0f}% confidence)",
+                        "is_read": False,
+                        "created_at": now
+                    })
+                    print("🚨 Successfully pushed real-time heads-up notification alert to Firestore")
+        except Exception as e:
+            print(f"⚠️ Failed to write Firestore event/notification: {e}")
 
         return payload
 
