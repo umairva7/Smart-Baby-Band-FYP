@@ -77,14 +77,26 @@ class FirestoreService {
     return _db
         .collection('notifications')
         .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
-        .limit(50)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) {
-              final data = doc.data();
-              data['id'] = doc.id;
-              return data;
-            }).toList());
+        .map((snapshot) {
+          final list = snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return data;
+          }).toList();
+          
+          // Sort in-memory to completely bypass the Firestore index requirement
+          list.sort((a, b) {
+            final aTime = a['created_at'];
+            final bTime = b['created_at'];
+            if (aTime == null || bTime == null) return 0;
+            if (aTime is Timestamp && bTime is Timestamp) {
+              return bTime.compareTo(aTime); // Descending (latest first)
+            }
+            return 0;
+          });
+          return list;
+        });
   }
 
   static Future<void> markNotificationAsRead(String notificationId) async {
