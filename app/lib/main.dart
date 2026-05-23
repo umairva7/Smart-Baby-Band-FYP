@@ -16,7 +16,7 @@ import 'history.dart';
 import 'notification.dart';
 import 'settings.dart';
 
-/// Global navigator key to navigate from anywhere in the app (including global alert listener)
+/// Global navigator key to navigate and show overlays from anywhere in the app
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 /// Global [ThemeProvider] instance shared across the app.
@@ -88,7 +88,7 @@ class MyApp extends StatelessWidget {
 }
 
 /// GlobalAlertListener wraps the entire Navigator tree to listen for real-time unread 
-/// critical alerts from Firestore and displays a gorgeous slide-down Heads-Up display.
+/// critical alerts from Firestore and manages heads-up overlays inside the Navigator.
 class GlobalAlertListener extends StatefulWidget {
   final Widget child;
   const GlobalAlertListener({super.key, required this.child});
@@ -105,10 +105,8 @@ class _GlobalAlertListenerState extends State<GlobalAlertListener> {
   // Cache to track which notification IDs we have already shown during this app runtime session
   final Set<String> _seenNotificationIds = {};
   
-  // State variables for the animated slide-down heads-up alert banner
-  Map<String, dynamic>? _activeAlert;
-  bool _isBannerVisible = false;
-  Timer? _autoHideTimer;
+  // Reference to the currently active heads-up overlay entry
+  OverlayEntry? _activeOverlayEntry;
 
   @override
   void initState() {
@@ -126,6 +124,7 @@ class _GlobalAlertListenerState extends State<GlobalAlertListener> {
       } else {
         _currentUserId = null;
         _unsubscribeNotifications();
+        _removeActiveOverlay();
       }
     });
   }
@@ -164,28 +163,105 @@ class _GlobalAlertListenerState extends State<GlobalAlertListener> {
   }
 
   void _triggerHeadsUpDisplay(Map<String, dynamic> alert) {
-    _autoHideTimer?.cancel();
+    _removeActiveOverlay();
 
-    setState(() {
-      _activeAlert = alert;
-      _isBannerVisible = true;
-    });
+    final overlayState = navigatorKey.currentState?.overlay;
+    if (overlayState == null) {
+      debugPrint("GlobalAlertListener: Overlay state not initialized yet. Skipping HUD banner.");
+      return;
+    }
 
-    // Auto-hide the heads-up banner after 6 seconds
-    _autoHideTimer = Timer(const Duration(seconds: 6), () {
-      if (mounted) {
-        setState(() {
-          _isBannerVisible = false;
-        });
-      }
-    });
+    _activeOverlayEntry = OverlayEntry(
+      builder: (context) {
+        return GlobalHeadsUpBanner(
+          alert: alert,
+          onDismiss: () {
+            _removeActiveOverlay();
+          },
+        );
+      },
+    );
+
+    overlayState.insert(_activeOverlayEntry!);
+  }
+
+  void _removeActiveOverlay() {
+    _activeOverlayEntry?.remove();
+    _activeOverlayEntry = null;
   }
 
   @override
   void dispose() {
     _authSubscription?.cancel();
     _unsubscribeNotifications();
+    _removeActiveOverlay();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Simply render the child Navigator, keeping this listener completely transparent and decoupled
+    return widget.child;
+  }
+}
+
+/// GlobalHeadsUpBanner is rendered inside the root Overlay of the Navigator,
+/// guaranteeing proper context ancestors (Overlay, MediaQuery, MaterialLocalizations).
+class GlobalHeadsUpBanner extends StatefulWidget {
+  final Map<String, dynamic> alert;
+  final VoidCallback onDismiss;
+
+  const GlobalHeadsUpBanner({
+    super.key,
+    required this.alert,
+    required this.onDismiss,
+  });
+
+  @override
+  State<GlobalHeadsUpBanner> createState() => _GlobalHeadsUpBannerState();
+}
+
+class _GlobalHeadsUpBannerState extends State<GlobalHeadsUpBanner> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _offsetAnimation;
+  Timer? _autoHideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+
+    _offsetAnimation = Tween<Offset>(
+      begin: const Offset(0, -1.5), // Positioned fully offscreen above the notch
+      end: const Offset(0, 0),       // Slide down into standard view
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack, // Bouncy entry animation
+    ));
+
+    // Trigger sliding animation
+    _controller.forward();
+
+    // Auto-hide the heads-up banner after 6 seconds
+    _autoHideTimer = Timer(const Duration(seconds: 6), _dismissBanner);
+  }
+
+  void _dismissBanner() async {
     _autoHideTimer?.cancel();
+    if (mounted) {
+      await _controller.reverse();
+    }
+    widget.onDismiss();
+  }
+
+  @override
+  void dispose() {
+    _autoHideTimer?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -194,36 +270,7 @@ class _GlobalAlertListenerState extends State<GlobalAlertListener> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
-    // Position parameters: hidden above screen vs visible at top
-    final double bannerTopPosition = _isBannerVisible 
-        ? MediaQuery.of(context).padding.top + 16 
-        : -200;
-
-    return Stack(
-      children: [
-        // The main Navigator tree containing all app screens
-        widget.child,
-
-        // The high-priority slide-down heads-up banner
-        AnimatedPositioned(
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeOutBack, // Incredibly satisfying bouncy entry curve
-          top: bannerTopPosition,
-          left: 16,
-          right: 16,
-          child: _activeAlert == null 
-              ? const SizedBox.shrink()
-              : Material(
-                  color: Colors.transparent,
-                  child: _buildHeadsUpBanner(context, _activeAlert!, isDark),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHeadsUpBanner(BuildContext context, Map<String, dynamic> alert, bool isDark) {
-    final theme = Theme.of(context);
+    final alert = widget.alert;
     final String id = alert['id'] ?? '';
     final String title = alert['title'] ?? 'Emergency Alert';
     final String message = alert['message'] ?? '';
@@ -233,114 +280,119 @@ class _GlobalAlertListenerState extends State<GlobalAlertListener> {
         ? AppColors.chartRed 
         : (type == 'warning' ? AppColors.chartOrange : AppColors.chartBlue);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: alertColor.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: alertColor.withValues(alpha: 0.25),
-            blurRadius: 20,
-            spreadRadius: 2,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () {
-            // Tap navigates user directly to alerts screen
-            setState(() {
-              _isBannerVisible = false;
-            });
-            navigatorKey.currentState?.pushNamed('/notifications');
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Glowing Left-side Status Icon
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: alertColor.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: SlideTransition(
+            position: _offsetAnimation,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[900] : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: alertColor.withValues(alpha: 0.4),
+                    width: 1.5,
                   ),
-                  child: Icon(
-                    type == 'critical' 
-                        ? Icons.warning_rounded 
-                        : (type == 'warning' ? Icons.thermostat_rounded : Icons.info_rounded),
-                    color: alertColor,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 14),
-
-                // Alert details Text
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: alertColor,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        message,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          height: 1.3,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Fast Action Buttons (Close and Mark as Read)
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () {
-                        setState(() {
-                          _isBannerVisible = false;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    IconButton(
-                      icon: Icon(Icons.check_circle_outline_rounded, color: alertColor, size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      tooltip: 'Mark as read',
-                      onPressed: () async {
-                        setState(() {
-                          _isBannerVisible = false;
-                        });
-                        await FirestoreService.markNotificationAsRead(id);
-                      },
+                  boxShadow: [
+                    BoxShadow(
+                      color: alertColor.withValues(alpha: 0.25),
+                      blurRadius: 20,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
-              ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () {
+                      _dismissBanner();
+                      navigatorKey.currentState?.pushNamed('/notifications');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Left-side dynamic warning icon
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: alertColor.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              type == 'critical' 
+                                  ? Icons.warning_rounded 
+                                  : (type == 'warning' ? Icons.thermostat_rounded : Icons.info_rounded),
+                              color: alertColor,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+
+                          // Alert description text
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: alertColor,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  message,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    height: 1.3,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          // Quick actions (Close and Mark as Read)
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded, size: 20),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: _dismissBanner,
+                              ),
+                              const SizedBox(height: 10),
+                              IconButton(
+                                icon: Icon(Icons.check_circle_outline_rounded, color: alertColor, size: 20),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Mark as read',
+                                onPressed: () async {
+                                  _dismissBanner();
+                                  await FirestoreService.markNotificationAsRead(id);
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
