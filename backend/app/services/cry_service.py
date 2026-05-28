@@ -140,8 +140,8 @@ class CryService:
                     if user_doc.exists:
                         settings = user_doc.to_dict().get("settings", {})
                         sensitivity = settings.get("cry_sensitivity", "Medium")
-                        sensitivity_map = {"Low": 0.80, "Medium": 0.60, "High": 0.40}
-                        confidence_threshold = sensitivity_map.get(sensitivity, 0.60)
+                        sensitivity_map = {"Low": 0.50, "Medium": 0.38, "High": 0.28}
+                        confidence_threshold = sensitivity_map.get(sensitivity, 0.38)
         except Exception as e:
             print(f"⚠️ Could not read cry sensitivity, using default: {e}")
 
@@ -236,8 +236,8 @@ class CryService:
         cry_type = max(predictions, key=predictions.get)
         confidence = predictions[cry_type]
 
-        # If confidence is lower than 72%, classify as "unknown"
-        if confidence < 0.72:
+        # If confidence is lower than 38%, classify as "unknown"
+        if confidence < 0.38:
             cry_type = "unknown"
 
         # Store the event in Firestore

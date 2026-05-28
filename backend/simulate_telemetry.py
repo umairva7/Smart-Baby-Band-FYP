@@ -237,6 +237,40 @@ def simulate_realtime_vitals(user_id, device_id):
         
     print(f"{CLR_GREEN}🎉 Success! Vitals telemetry pushed. Check your App's Dashboard, Charts & Alerts!{CLR_END}\n")
 
+def simulate_sleep_session(user_id, device_id):
+    """Simulates baby sleep sessions (awake, light, deep sleep) and logs to Firestore."""
+    db_fs = firestore.client()
+    
+    print(f"\n{CLR_BLUE}=== Sleep Session Telemetry Simulator ==={CLR_END}")
+    print("Choose Sleep State to log:")
+    print("1) Awake (Active & Calm)")
+    print("2) Light Sleep (Dozing off)")
+    print("3) Deep Sleep (Resting soundly)")
+    
+    choice = input("Select option (1-3): ").strip()
+    
+    states = {
+        "1": "awake",
+        "2": "light",
+        "3": "deep"
+    }
+    
+    if choice not in states:
+        print(f"{CLR_FAIL}Invalid choice. Cancelled.{CLR_END}")
+        return
+        
+    sleep_state = states[choice]
+    now = datetime.now(timezone_aware_utc())
+    
+    print(f"💾 Saving Sleep Session log: '{sleep_state.upper()}' to Firestore...")
+    db_fs.collection("sleep_sessions").add({
+        "device_id": device_id,
+        "sleep_state": sleep_state,
+        "timestamp": now
+    })
+    
+    print(f"{CLR_GREEN}🎉 Success! Sleep state '{sleep_state.upper()}' simulated. Look at your Dashboard & Sleep History screen!{CLR_END}\n")
+
 def generate_24h_history(user_id, device_id):
     """Generates 24-hours of realistic, fluctuating history records for premium chart views."""
     db_fs = firestore.client()
@@ -486,22 +520,25 @@ def main():
         print("=" * 55)
         print("1) Simulate Cry ML Inference (Quick Trigger)")
         print("2) Simulate Vitals Telemetry (Heart Rate & Temp)")
-        print("3) Populate 24-Hour Vitals History Charts (Premium Graph)")
-        print("4) Test ML Pipeline with Real WAV Audio Dataset (Advanced)")
-        print("5) Exit")
+        print("3) Simulate Baby Sleep Session (Awake, Light, Deep Sleep)")
+        print("4) Populate 24-Hour Vitals History Charts (Premium Graph)")
+        print("5) Test ML Pipeline with Real WAV Audio Dataset (Advanced)")
+        print("6) Exit")
         print("=" * 55)
         
-        choice = input("Enter choice (1-5): ").strip()
+        choice = input("Enter choice (1-6): ").strip()
         
         if choice == "1":
             simulate_cry_event(user_id, device_id)
         elif choice == "2":
             simulate_realtime_vitals(user_id, device_id)
         elif choice == "3":
-            generate_24h_history(user_id, device_id)
+            simulate_sleep_session(user_id, device_id)
         elif choice == "4":
-            test_real_wav_dataset(user_id, device_id)
+            generate_24h_history(user_id, device_id)
         elif choice == "5":
+            test_real_wav_dataset(user_id, device_id)
+        elif choice == "6":
             print("\n👋 Happy testing! See you soon!")
             break
         else:

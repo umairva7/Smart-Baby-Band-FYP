@@ -96,7 +96,6 @@ def main():
         train_ds,
         validation_data=val_ds,
         epochs=100,
-        class_weight=class_weight_dict,
         callbacks=callbacks
     )
     

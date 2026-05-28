@@ -284,10 +284,26 @@ class _DashboardContent extends StatelessWidget {
                   stream: FirestoreService.getEnvironmentLogs(globalDeviceId),
                   builder: (context, envSnap) {
                     // 1. Cry classification details
+                    // Cry alerts expire after 5 minutes — a 4-day-old event
+                    // should not keep the Pain icon glowing.
                     String cryType = 'unknown';
                     bool cryDetected = false;
                     if (crySnap.hasData && crySnap.data != null) {
                       cryDetected = crySnap.data!['cry_detected'] ?? false;
+
+                      // Staleness gate: ignore cry events older than 5 minutes
+                      if (cryDetected && crySnap.data!['timestamp'] != null) {
+                        try {
+                          final cryTime = DateTime.parse(crySnap.data!['timestamp']);
+                          if (DateTime.now().difference(cryTime).inMinutes > 5) {
+                            cryDetected = false; // stale — band likely quiet now
+                          }
+                        } catch (_) {
+                          // malformed timestamp, treat as stale
+                          cryDetected = false;
+                        }
+                      }
+
                       if (!cryDetected) {
                         cryType = 'unknown';
                       } else {
@@ -296,12 +312,25 @@ class _DashboardContent extends StatelessWidget {
                     }
 
                     // 2. Sleep session details
+                    // If the last sleep log is older than 3 hours, treat it as
+                    // stale (band offline) and default to 'awake' so we don't
+                    // show absurd durations like "114h deep sleep".
                     String sleepState = 'Loading...';
                     List<Map<String, dynamic>> sleepSessions = [];
                     if (sleepSnap.hasData && sleepSnap.data != null) {
                       sleepSessions = sleepSnap.data!;
                       if (sleepSessions.isNotEmpty) {
-                        sleepState = sleepSessions.first['sleep_state'] ?? 'awake';
+                        final lastTs = sleepSessions.first['timestamp'];
+                        bool isStale = false;
+                        if (lastTs != null) {
+                          final DateTime lastTime = (lastTs as Timestamp).toDate();
+                          isStale = DateTime.now().difference(lastTime).inHours >= 3;
+                        }
+                        if (isStale) {
+                          sleepState = 'awake'; // band offline — don't show stale sleep
+                        } else {
+                          sleepState = sleepSessions.first['sleep_state'] ?? 'awake';
+                        }
                       } else {
                         sleepState = 'awake';
                       }
@@ -442,24 +471,31 @@ class _DashboardContent extends StatelessWidget {
                                     children: [
                                       _cryTypeCard(
                                         context,
-                                        'images/hunger.jpg',
+                                        Icons.local_dining_rounded,
                                         'Hunger',
                                         AppColors.chartOrange,
                                         cryType == 'hungry',
                                       ),
                                       _cryTypeCard(
                                         context,
-                                        'images/sleep.jpeg',
-                                        'Deep',
+                                        Icons.bedtime_rounded,
+                                        'Sleepy',
                                         AppColors.chartIndigo,
                                         cryType == 'tired',
                                       ),
                                       _cryTypeCard(
                                         context,
-                                        'images/cry.jpeg',
+                                        Icons.baby_changing_station_rounded,
+                                        'Diaper',
+                                        AppColors.chartGreen,
+                                        cryType == 'diaper',
+                                      ),
+                                      _cryTypeCard(
+                                        context,
+                                        Icons.warning_amber_rounded,
                                         'Pain',
                                         AppColors.chartRed,
-                                        cryType == 'discomfort',
+                                        cryType == 'discomfort' || cryType == 'pain',
                                       ),
                                     ],
                                   ),
@@ -533,23 +569,30 @@ class _DashboardContent extends StatelessWidget {
   }
 
   Widget _cryTypeCard(
-      BuildContext context, String image, String label, Color accentColor, bool isActive) {
+      BuildContext context, IconData icon, String label, Color accentColor, bool isActive) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    final Widget cardImage = Container(
+    final Widget cardIcon = Container(
       height: 70,
       width: 70,
-      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: (isActive ? accentColor : Colors.grey).withValues(alpha: 0.10),
+        color: isActive 
+            ? accentColor.withValues(alpha: 0.18) 
+            : colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         shape: BoxShape.circle,
         border: Border.all(
-          color: (isActive ? accentColor : Colors.grey).withValues(alpha: 0.25),
-          width: 1.5,
+          color: isActive 
+              ? accentColor.withValues(alpha: 0.35) 
+              : colorScheme.outlineVariant,
+          width: isActive ? 2 : 1.5,
         ),
       ),
-      child: Image.asset(image),
+      child: Icon(
+        icon,
+        color: isActive ? accentColor : colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+        size: 32,
+      ),
     );
 
     return Column(
@@ -557,7 +600,7 @@ class _DashboardContent extends StatelessWidget {
         PulsingActiveCard(
           isActive: isActive,
           glowColor: accentColor,
-          child: cardImage,
+          child: cardIcon,
         ),
         const SizedBox(height: 8),
         Text(
@@ -565,7 +608,7 @@ class _DashboardContent extends StatelessWidget {
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: isActive ? FontWeight.w800 : FontWeight.w500,
             color: isActive ? accentColor : colorScheme.onSurfaceVariant,
-            fontSize: isActive ? 16 : 14,
+            fontSize: isActive ? 15 : 13,
           ),
         ),
       ],

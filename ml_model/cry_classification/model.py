@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, MaxPooling2D, Dropout, Reshape, MultiHeadAttention, LSTM, Dense, Input, Permute, LayerNormalization, Add, GlobalAveragePooling1D
+from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, MaxPooling2D, Dropout, Reshape, MultiHeadAttention, LSTM, Bidirectional, Dense, Input, Permute, LayerNormalization, Add, GlobalAveragePooling1D
 from tensorflow.keras.models import Model
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.optimizers import Adam
@@ -51,10 +51,16 @@ def build_model(input_shape=(128, 128, 1), num_classes=4, batch_size=None):
     # Flatten frequency and channels into a single feature vector per timestep
     x = Reshape((-1, shape[1] * shape[3]))(x) # (None, 8, 512)
     
-    # --- 3. Stacked LSTMs ---
-    x = LSTM(128, return_sequences=True)(x)
-    x = LSTM(64, return_sequences=False)(x)
-    x = Dropout(0.3)(x)
+    # --- 3. Bidirectional LSTMs with regularization ---
+    x = Bidirectional(LSTM(128, return_sequences=True,
+                           kernel_regularizer=l2(1e-4),
+                           recurrent_regularizer=l2(1e-4),
+                           recurrent_dropout=0.2))(x)
+    x = Bidirectional(LSTM(64, return_sequences=False,
+                           kernel_regularizer=l2(1e-4),
+                           recurrent_regularizer=l2(1e-4),
+                           recurrent_dropout=0.2))(x)
+    x = Dropout(0.4)(x)
     
     # --- 4. Classifier ---
     outputs = Dense(num_classes, activation='softmax')(x)
