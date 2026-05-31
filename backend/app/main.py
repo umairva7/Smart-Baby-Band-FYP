@@ -32,6 +32,7 @@ from app.routes import (
     sleep,
     notifications,
     reports,
+    alerts,
 )
 
 
@@ -91,6 +92,7 @@ app.include_router(cry_events.router,   prefix="/api/cry",           tags=["Cry 
 app.include_router(sleep.router,        prefix="/api/sleep",         tags=["Sleep Tracking"])
 app.include_router(notifications.router,prefix="/api/notifications", tags=["Notifications"])
 app.include_router(reports.router,      prefix="/api/reports",       tags=["Reports"])
+app.include_router(alerts.router,       prefix="/api/alerts",        tags=["Alerts"])
 
 
 # ── Health Check Endpoint ─────────────────────────────────────
