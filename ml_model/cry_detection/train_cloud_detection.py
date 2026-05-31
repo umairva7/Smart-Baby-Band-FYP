@@ -76,28 +76,23 @@ def get_training_data():
 
 def build_model():
     model = Sequential([
-        Conv2D(16, (3, 3), padding='same', kernel_regularizer=l2(0.001), input_shape=(128, 128, 1)),
+        Conv2D(16, (3, 3), padding='same', activation='relu', input_shape=(128, 128, 1)),
         BatchNormalization(),
-        ReLU(),
         MaxPool2D((2, 2)),
         
-        Conv2D(32, (3, 3), padding='same', kernel_regularizer=l2(0.001)),
+        Conv2D(32, (3, 3), padding='same', activation='relu'),
         BatchNormalization(),
-        ReLU(),
         MaxPool2D((2, 2)),
         
-        Conv2D(32, (3, 3), padding='same', kernel_regularizer=l2(0.001)),
+        Conv2D(64, (3, 3), padding='same', activation='relu'),
         BatchNormalization(),
-        ReLU(),
         MaxPool2D((2, 2)),
         
         Flatten(),
-        Dense(32, kernel_regularizer=l2(0.001)),
-        ReLU(),
-        Dropout(0.3),
+        Dense(64, activation='relu'),
+        Dropout(0.4),
         
-        Dense(16, kernel_regularizer=l2(0.001)),
-        ReLU(),
+        Dense(32, activation='relu'),
         Dropout(0.3),
         
         Dense(1, activation='sigmoid')

@@ -4,6 +4,7 @@ import librosa
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from skimage.transform import resize
 
 # Config
 SR = 16000
@@ -20,8 +21,7 @@ PROCESSED_DIR = "data/processed/"
 FEATURES_DIR = "features/"
 MODELS_DIR = "models/"
 
-import tensorflow_hub as hub
-import tensorflow as tf
+
 
 def extract_features(audio_path):
     # Load audio
@@ -36,25 +36,20 @@ def extract_features(audio_path):
     # Mel Spectrogram
     mel = librosa.feature.melspectrogram(y=y, sr=SR, n_fft=N_FFT, hop_length=HOP_LENGTH, 
                                          n_mels=N_MELS, fmin=FMIN, fmax=FMAX)
-    mel_db = librosa.power_to_db(mel, ref=np.max) # (128, 128)
+    mel_db = librosa.power_to_db(mel, ref=np.max)
     
-    # Truncate to 128 frames across time axis just to be safe
-    mel_db = mel_db[:, :128]
+    # Ensure exactly 128 frames (it usually generates 129 due to centering)
+    if mel_db.shape[1] > 128:
+        mel_db = mel_db[:, :128]
+    elif mel_db.shape[1] < 128:
+        mel_db = np.pad(mel_db, ((0, 0), (0, 128 - mel_db.shape[1])), mode='constant')
     
-    if mel_db.shape[1] < 128:
-        pad_width = 128 - mel_db.shape[1]
-        mel_db = np.pad(mel_db, ((0,0), (0,pad_width)), 'constant')
-        
-    # Normalize per-channel (here per-feature matrix) to [0, 1]
-    min_val = np.min(mel_db)
-    max_val = np.max(mel_db)
-    if max_val > min_val:
-        mel_db = (mel_db - min_val) / (max_val - min_val)
-    else:
-        mel_db = mel_db - min_val
-        
-    # Add channel dim
-    features = np.expand_dims(mel_db, axis=-1) # (128, 128, 1)
+    # Min-Max Normalization to [0, 1]
+    mel_norm = (mel_db - np.min(mel_db)) / (np.max(mel_db) - np.min(mel_db) + 1e-8)
+    
+    # Expand dims for CNN (128, 128, 1)
+    features = np.expand_dims(mel_norm, axis=-1)
+    
     return features
 
 def main():

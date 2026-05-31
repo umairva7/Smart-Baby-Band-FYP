@@ -26,7 +26,7 @@ def preprocess_audio(audio_bytes: bytes) -> np.ndarray:
     # Compute Mel Spectrogram
     # Using hop_length=375 as in features.py to get roughly 128 frames for 3.0s at 16kHz
     mel = librosa.feature.melspectrogram(
-        y=y, sr=16000, n_mels=128, n_fft=512, hop_length=375
+        y=y, sr=16000, n_mels=128, n_fft=512, hop_length=375, fmin=0, fmax=8000
     )
     
     # Convert to dB
