@@ -2,7 +2,7 @@ import requests
 import json
 import time
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://20.195.40.177:8000"
 
 def test_health():
     print("Testing /api/health ...")

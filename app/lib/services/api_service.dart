@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 class ApiService {
   // Use 10.0.2.2 for Android emulator, or your actual local IP (e.g., 192.168.x.x) for physical device.
-  static const String BASE_URL = 'http://10.0.2.2:8000/api';
+  static const String BASE_URL = 'http://20.195.40.177:8000/api';
 
   static Future<Map<String, dynamic>?> postSensors(Map<String, dynamic> payload) async {
     try {

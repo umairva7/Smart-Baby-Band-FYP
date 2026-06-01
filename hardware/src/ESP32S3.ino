@@ -24,11 +24,11 @@
 const char* ssid = "Note 10";
 const char* password = "23456789";
 
-const char* mqtt_server = "10.184.183.100";
+const char* mqtt_server = "20.195.40.177";
 const int mqtt_port = 1883;
 const char* mqtt_client_id = "ESP32_001";
 const char* mqtt_topic = "babyband/01/data";
-const char* audio_post_url = "http://10.184.183.100:8000/predict";
+const char* audio_post_url = "http://20.195.40.177:8000/predict";
 const uint32_t audio_post_timeout_ms = 15000;
 const uint32_t wifi_connect_timeout_ms = 10000;
 const uint32_t mqtt_connect_timeout_ms = 5000;
