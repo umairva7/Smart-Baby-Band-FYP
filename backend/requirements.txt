@@ -27,6 +27,7 @@ soundfile==0.12.1
 pandas==2.2.0
 scikit-image==0.22.0
 tqdm==4.66.2
+setuptools<70.0.0
 
 # ── Testing ───────────────────────────────────────────
 pytest==8.3.0
