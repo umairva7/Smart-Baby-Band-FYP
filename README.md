@@ -187,3 +187,7 @@ It reflects practical industry-ready skills in IoT, AI systems, and cloud integr
 Academic Research Project – University of Central Punjab (2025)
 
 For demonstration and educational purposes.
+
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
+
+ssh -i baby-band_key.pem azureuser@20.195.40.177
