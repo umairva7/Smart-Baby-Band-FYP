@@ -85,6 +85,7 @@ async def predict_cry_audio(request: Request):
     # --- Binary Cry Detection Gate ---
     is_cry, confidence = cry_detector.is_cry(audio_bytes)
     if not is_cry:
+        print(f"\n🔇 [CLOUD VAD] Audio rejected as non-cry (Confidence: {confidence*100:.1f}%)")
         return {
             "cry_detected": False,
             "confidence": round(float(confidence), 4),

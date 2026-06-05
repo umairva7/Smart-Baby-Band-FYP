@@ -23,6 +23,9 @@ def on_message(client, userdata, msg):
         
         # We process 10-second telemetry. (Cry events bypass this via HTTP /predict)
         if payload.get("event") == "sensor_status" or "heart" in payload:
+            print(f"\n📊 [MQTT] Received Telemetry:")
+            print(json.dumps(payload, indent=2))
+            
             ref = db.reference("sensor_telemetry")
             ref.push(payload)
             print("📡 Forwarded MQTT Telemetry to Firebase RTDB.")

@@ -100,6 +100,16 @@ class CryService:
         # Parse raw audio (Assuming 16-bit PCM)
         try:
             audio_data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            
+            print(f"Audio shape: {audio_data.shape}")
+            print(f"Audio min: {audio_data.min():.4f}, max: {audio_data.max():.4f}")
+            print(f"Audio mean: {audio_data.mean():.4f}, std: {audio_data.std():.4f}")
+            
+            import time
+            debug_path = f"/tmp/esp32_clip_{int(time.time())}.wav"
+            sf.write(debug_path, audio_data, 16000)
+            print(f"💾 Saved debug clip to: {debug_path}")
+            
         except Exception as e:
             raise Exception(f"Failed to parse audio bytes: {e}")
 
@@ -147,6 +157,9 @@ class CryService:
 
         if confidence < confidence_threshold:
             cry_type = "unknown"
+
+        print(f"\n🗣️ [AUDIO] Cry Classification Result: {cry_type.upper()} (Confidence: {confidence*100:.1f}%)")
+        print(f"   All predictions: {pred_dict}\n")
 
         # Push to RTDB
         payload = {

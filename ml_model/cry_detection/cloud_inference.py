@@ -7,7 +7,7 @@ import tensorflow as tf
 from ml_model.cry_classification.preprocess import preprocess_audio
 
 class CryDetector:
-    def __init__(self, model_path: str, threshold: float = 0.5):
+    def __init__(self, model_path: str, threshold: float = 0.25):
         self.model_path = model_path
         self.threshold = threshold
         
