@@ -20,14 +20,14 @@
 // =========================
 // WIFI / LOCAL MQTT / FASTAPI
 // =========================
-const char* ssid = "Personal";
-const char* password = "123456789012";
+const char* ssid = "12";
+const char* password = "........";
 
-const char* mqtt_server = "10.213.53.100";
+const char* mqtt_server = "20.195.40.177";
 const int mqtt_port = 1883;
 const char* mqtt_client_id = "ESP32_001";
 const char* mqtt_topic = "babyband/01/data";
-const char* audio_post_url = "http://10.213.53.100:8000/predict";
+const char* audio_post_url = "http://20.195.40.177:8000/predict";
 const uint32_t audio_post_timeout_ms = 15000;
 const uint32_t wifi_connect_timeout_ms = 10000;
 const uint32_t mqtt_connect_timeout_ms = 5000;

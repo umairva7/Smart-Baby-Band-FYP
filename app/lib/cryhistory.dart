@@ -211,26 +211,25 @@ class CryPage extends StatelessWidget {
         spots.add(FlSpot(h.toDouble(), 0));
       }
     } else {
-      // Map live cry events to hourly spots based on time of occurrence and confidence
+      // Group cries by hour, storing the max intensity per hour
+      Map<int, double> hourlyMax = {};
       for (var e in events) {
         final ts = e['timestamp'];
         if (ts != null) {
           final DateTime dt = ts is Timestamp ? ts.toDate() : DateTime.fromMillisecondsSinceEpoch(ts as int);
-          final double timeOfDay = dt.hour + (dt.minute / 60.0);
+          final int hour = dt.hour;
           final double confidence = ((e['confidence'] ?? 0.8) as num).toDouble() * 100;
-          spots.add(FlSpot(timeOfDay, confidence));
+          
+          if (!hourlyMax.containsKey(hour) || confidence > hourlyMax[hour]!) {
+            hourlyMax[hour] = confidence;
+          }
         }
       }
-      
-      // Safety sort to ensure fl_chart draws chronologically along X axis
-      spots.sort((a, b) => a.x.compareTo(b.x));
 
-      // Anchor corners for clean aesthetics
-      if (spots.first.x > 0) {
-        spots.insert(0, FlSpot(0, spots.first.y * 0.4));
-      }
-      if (spots.last.x < 24) {
-        spots.add(FlSpot(24, spots.last.y * 0.4));
+      // Populate exactly 24 points (one for each hour).
+      // Drop to 0 for hours where no cries occurred. This fixes overlapping and weird bezier curves!
+      for (int h = 0; h <= 24; h++) {
+        spots.add(FlSpot(h.toDouble(), hourlyMax[h] ?? 0.0));
       }
     }
 

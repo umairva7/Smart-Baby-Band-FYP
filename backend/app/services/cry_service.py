@@ -137,7 +137,7 @@ class CryService:
         confidence = pred_dict[cry_type]
 
         # Read user's cry sensitivity setting from Firestore
-        confidence_threshold = 0.60  # default: Medium
+        confidence_threshold = 0.28  # default: High sensitivity (fewer unknowns)
         try:
             from firebase_admin import firestore as fs_admin
             db_fs = fs_admin.client()
@@ -149,9 +149,9 @@ class CryService:
                     user_doc = db_fs.collection("users").document(user_id).get()
                     if user_doc.exists:
                         settings = user_doc.to_dict().get("settings", {})
-                        sensitivity = settings.get("cry_sensitivity", "Medium")
-                        sensitivity_map = {"Low": 0.50, "Medium": 0.38, "High": 0.28}
-                        confidence_threshold = sensitivity_map.get(sensitivity, 0.38)
+                        sensitivity = settings.get("cry_sensitivity", "High")
+                        sensitivity_map = {"Low": 0.50, "Medium": 0.30, "High": 0.20}
+                        confidence_threshold = sensitivity_map.get(sensitivity, 0.28)
         except Exception as e:
             print(f"⚠️ Could not read cry sensitivity, using default: {e}")
 

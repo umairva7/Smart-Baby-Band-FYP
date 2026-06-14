@@ -49,7 +49,7 @@ def on_message(client, userdata, msg):
                     t_stat, h_stat, overall = classify_environment(temp, hum)
                     env_doc = {
                         "device_id": device_id,
-                        "timestamp": timestamp,
+                        "timestamp": firestore.SERVER_TIMESTAMP,
                         "temperature": temp,
                         "humidity": hum,
                         "temperature_status": t_stat,
@@ -112,31 +112,52 @@ def _check_alert_thresholds(db_fs, baby_id, device_id, heart, env):
         temp = env.get("temperature", 0)
         finger = heart.get("fingerDetected", False)
         valid = heart.get("valid", False)
+        
+        fcm_token = user_doc.to_dict().get("fcm_token") if user_doc.exists else None
+
+        # Helper to send FCM
+        def send_fcm(title, body):
+            if fcm_token:
+                try:
+                    from firebase_admin import messaging
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=title, body=body),
+                        token=fcm_token,
+                    )
+                    messaging.send(message)
+                except Exception as e:
+                    print(f"⚠️ FCM send failed: {e}")
 
         # Heart Rate Alert
         if valid and finger and bpm > hr_threshold:
+            title = "⚠️ High Heart Rate Alert"
+            body = f"Heart rate reached {bpm:.0f} BPM (threshold: {hr_threshold:.0f} BPM)"
             db_fs.collection("notifications").add({
                 "user_id": user_id,
                 "baby_id": baby_id,
                 "type": "critical",
-                "title": "⚠️ High Heart Rate Alert",
-                "message": f"Heart rate reached {bpm:.0f} BPM (threshold: {hr_threshold:.0f} BPM)",
+                "title": title,
+                "message": body,
                 "is_read": False,
                 "created_at": datetime.utcnow(),
             })
+            send_fcm(title, body)
             print(f"🔔 Heart rate alert: {bpm:.0f} BPM > {hr_threshold:.0f}")
 
         # Temperature Alert
         if env.get("valid", False) and temp > temp_threshold:
+            title = "🌡️ High Temperature Alert"
+            body = f"Temperature reached {temp:.1f}°C (threshold: {temp_threshold:.1f}°C)"
             db_fs.collection("notifications").add({
                 "user_id": user_id,
                 "baby_id": baby_id,
                 "type": "warning",
-                "title": "🌡️ High Temperature Alert",
-                "message": f"Temperature reached {temp:.1f}°C (threshold: {temp_threshold:.1f}°C)",
+                "title": title,
+                "message": body,
                 "is_read": False,
                 "created_at": datetime.utcnow(),
             })
+            send_fcm(title, body)
             print(f"🔔 Temperature alert: {temp:.1f}°C > {temp_threshold:.1f}")
 
     except Exception as e:

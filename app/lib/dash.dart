@@ -206,7 +206,13 @@ class _DashboardContent extends StatelessWidget {
     if (sessions.isNotEmpty) {
       final DateTime startTime = (sessions.first['timestamp'] as Timestamp).toDate();
       final duration = DateTime.now().difference(startTime);
-      durationLabel = 'Active for ${_formatDuration(duration)}';
+      
+      if (duration.inDays > 0) {
+        durationLabel = 'Started ${duration.inDays} day${duration.inDays > 1 ? 's' : ''} ago';
+      } else {
+        String prefix = sleepState == 'awake' ? 'Awake' : 'Asleep';
+        durationLabel = '$prefix for ${_formatDuration(duration)}';
+      }
     }
 
     return Row(
@@ -358,14 +364,30 @@ class _DashboardContent extends StatelessWidget {
                     // 4. Reactive last updated calculation
                     DateTime? latestTime;
                     if (envSnap.hasData && envSnap.data != null && envSnap.data!.isNotEmpty) {
-                      final envTime = (envSnap.data!.first['timestamp'] as Timestamp).toDate();
-                      if (latestTime == null || envTime.isAfter(latestTime)) {
+                      final envTs = envSnap.data!.first['timestamp'];
+                      DateTime? envTime;
+                      if (envTs is Timestamp) {
+                        envTime = envTs.toDate();
+                      } else if (envTs is int) {
+                        envTime = DateTime.fromMillisecondsSinceEpoch(envTs);
+                      } else if (envTs is String) {
+                        envTime = DateTime.tryParse(envTs);
+                      }
+                      if (envTime != null && (latestTime == null || envTime.isAfter(latestTime))) {
                         latestTime = envTime;
                       }
                     }
                     if (sleepSnap.hasData && sleepSnap.data != null && sleepSnap.data!.isNotEmpty) {
-                      final sleepTime = (sleepSnap.data!.first['timestamp'] as Timestamp).toDate();
-                      if (latestTime == null || sleepTime.isAfter(latestTime)) {
+                      final sleepTs = sleepSnap.data!.first['timestamp'];
+                      DateTime? sleepTime;
+                      if (sleepTs is Timestamp) {
+                        sleepTime = sleepTs.toDate();
+                      } else if (sleepTs is int) {
+                        sleepTime = DateTime.fromMillisecondsSinceEpoch(sleepTs);
+                      } else if (sleepTs is String) {
+                        sleepTime = DateTime.tryParse(sleepTs);
+                      }
+                      if (sleepTime != null && (latestTime == null || sleepTime.isAfter(latestTime))) {
                         latestTime = sleepTime;
                       }
                     }

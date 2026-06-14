@@ -228,11 +228,13 @@ class TemperaturePage extends StatelessWidget {
       final temp = (entry['temperature'] ?? 0).toDouble();
       if (temp < 30 || temp > 45) continue; // skip invalid readings
 
-      // Parse timestamp
+      // Parse timestamp (handles Firestore Timestamp, int millis, and String)
       DateTime? entryTime;
       final ts = entry['timestamp'];
       if (ts is Timestamp) {
         entryTime = ts.toDate();
+      } else if (ts is int) {
+        entryTime = DateTime.fromMillisecondsSinceEpoch(ts);
       } else if (ts is String) {
         entryTime = DateTime.tryParse(ts);
       }

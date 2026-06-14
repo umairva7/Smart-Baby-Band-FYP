@@ -605,9 +605,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 10),
                   Slider(
                     value: tempValue,
-                    min: 35.0,
+                    min: 22.0,
                     max: 40.0,
-                    divisions: 50,
+                    divisions: 180,
                     label: '${tempValue.toStringAsFixed(1)}°C',
                     onChanged: (value) {
                       setDialogState(() => tempValue = value);
@@ -616,7 +616,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('35.0°C', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
+                      Text('22.0°C', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                       Text('Normal: 36.5-37.5', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                       Text('40.0°C', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                     ],
