@@ -7,17 +7,16 @@
 ## 🏗️ Architecture
 
 ```
-ESP32 → MQTT → AWS IoT Core → Lambda → Firestore ← Flutter (real-time)
-                                                   ← FastAPI (ML + reports)
+ESP32 → MQTT → Mosquitto Broker (Azure VM) → FastAPI (Azure VM) → Firestore ← Flutter (real-time)
 ```
 
 | Component | Role |
 |-----------|------|
-| **FastAPI** | ML inference, reports, complex queries |
+| **FastAPI** | ML inference, MQTT ingestion, reports, complex queries |
 | **Firebase Auth** | User authentication (login/register from Flutter) |
-| **Firestore** | Real-time database for all sensor/event data |
-| **AWS Lambda** | Bridges MQTT sensor data from IoT Core to Firestore |
-| **AWS IoT Core** | MQTT broker for ESP32 communication |
+| **Firestore / RTDB** | Real-time database for all sensor/event data |
+| **Mosquitto** | MQTT broker running locally on the Azure VM for ESP32 communication |
+| **Azure VM** | Ubuntu Server hosting the complete backend infrastructure |
 
 ---
 
@@ -35,9 +34,8 @@ ESP32 → MQTT → AWS IoT Core → Lambda → Firestore ← Flutter (real-time)
 cd backend
 
 # Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
 
 # Install dependencies
 pip install -r requirements.txt
@@ -47,7 +45,7 @@ cp .env.example .env
 
 # Place your Firebase service account key
 # Download from: Firebase Console → Project Settings → Service Accounts
-# Save as: backend/firebase-service-account.json
+# Save as: backend/firebase_key.json
 ```
 
 ### 3. Run the Server
@@ -69,20 +67,17 @@ Open in browser: **http://localhost:8000/docs** (Swagger UI)
 backend/
 ├── app/
 │   ├── main.py              # FastAPI entry point
-│   ├── config.py             # Environment settings
-│   ├── firebase_client.py    # Firebase Admin SDK setup
-│   ├── models/               # Firestore document type hints
-│   ├── schemas/              # Pydantic validation models
-│   ├── routes/               # API endpoint definitions
-│   ├── services/             # Business logic layer
-│   ├── middleware/            # Firebase Auth token verification
-│   └── utils/                # Helper functions
-├── lambda/                   # AWS Lambda functions
-├── ml_models/                # TFLite model files
-├── tests/                    # Test files
-├── .env.example              # Example environment config
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+│   ├── mqtt_client.py       # Paho MQTT subscriber & Firestore writer
+│   ├── firebase_client.py   # Firebase Admin SDK setup
+│   ├── routes/              # API endpoint definitions
+│   ├── services/            # Business logic (Cry & Sleep Services)
+│   └── utils/               # Helper functions
+├── ml_models/               # Trained .keras models for inference
+├── tests/                   # Test scripts
+├── .env                     # Environment config
+├── firebase_key.json        # Firebase Admin credentials
+├── requirements.txt         # Python dependencies
+└── README.md                # This file
 ```
 
 ---
@@ -93,23 +88,22 @@ backend/
 |--------|----------|-------------|
 | `GET` | `/` | Health check |
 | `GET` | `/api/health` | Health check + Firebase status |
+| `POST`| `/predict` | Raw PCM audio upload for Two-Stage ML cry classification |
 | `GET` | `/api/auth/profile` | Get user profile |
 | `PUT` | `/api/auth/settings` | Update user settings |
 | `GET/POST` | `/api/baby/profile` | Baby profile CRUD |
 | `GET` | `/api/sensor/latest/{baby_id}` | Latest sensor reading |
 | `GET` | `/api/sensor/history/{baby_id}` | Sensor history |
-| `POST` | `/api/cry/classify` | ML cry classification |
 | `GET` | `/api/cry/history/{baby_id}` | Cry event history |
 | `GET` | `/api/sleep/history/{baby_id}` | Sleep session history |
 | `GET` | `/api/notifications/` | User notifications |
-| `GET` | `/api/reports/weekly/{baby_id}` | Weekly health report |
 | `GET` | `/api/reports/dashboard/{baby_id}` | Dashboard summary |
 
 ---
 
 ## 🔒 Authentication
 
-All endpoints (except health checks) require a Firebase Auth ID token:
+Most endpoints require a Firebase Auth ID token:
 
 ```
 Authorization: Bearer <firebase_id_token>

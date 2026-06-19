@@ -5,6 +5,22 @@
 
 ---
 
+## 🎯 Project Status
+
+| Component | Status |
+|-----------|--------|
+| Hardware (ESP32-S3 + Sensors) | ✅ Complete |
+| Mosquitto MQTT Pipeline | ✅ Complete |
+| FastAPI Backend | ✅ Complete |
+| Firebase (Firestore + FCM) | ✅ Complete |
+| Binary Cry Model (Stage 1) | ✅ Complete |
+| Cry Classification Model (Stage 2) | ✅ Complete |
+| Sleep Tracking Logic | ✅ Complete |
+| Flutter Mobile App | ✅ Complete |
+| 3D Printed Enclosure | 🔄 In Progress |
+
+---
+
 ## 📌 Project Overview
 
 The **Smart Baby Band** is an AI-enabled IoT wearable device designed to monitor infant health and behavior in real time. The system integrates embedded hardware, cloud computing, machine learning, and a mobile application into one complete end-to-end solution.
@@ -13,7 +29,7 @@ The objective is to assist parents in understanding baby needs through intellige
 
 ### Core Capabilities
 
-* 🎤 AI-Based Cry Classification (Hunger, Pain, Discomfort, Normal)
+* 🎤 AI-Based Cry Classification (Hungry, Tired, Discomfort, Diaper)
 * 💤 Sleep Stage Detection (Awake, Light, Deep)
 * 💓 Heart Rate Monitoring (MAX30102)
 * 🌡️ Temperature & Humidity Monitoring (BME280 / DHT11)
@@ -27,13 +43,13 @@ The objective is to assist parents in understanding baby needs through intellige
 ### End-to-End Data Flow
 
 1. Sensors collect physiological and environmental data.
-2. ESP32 processes signals and formats data packets.
-3. Data is transmitted securely via MQTT over WiFi to AWS IoT Core.
-4. AWS Lambda bridges sensor data to Firebase Firestore for storage and real-time syncing.
-5. FastAPI backend runs sliding-window statistical analysis for sleep and executes Keras/TFLite models for cry classification.
-6. Mobile application streams insights via Firestore/RTDB and receives real-time FCM Push Notifications for alerts.
+2. ESP32 processes signals and formats data packets. It runs a local Voice Activity Detection (VAD) gate to filter out silence.
+3. Data is transmitted securely via **MQTT** over WiFi to a local **Mosquitto Broker** hosted on an Azure VM.
+4. Raw audio (when VAD triggers) is sent via HTTP POST to the FastAPI backend `/predict` endpoint.
+5. **FastAPI backend** (Azure VM) bridges sensor data to Firebase Firestore/RTDB for storage. It runs sliding-window statistical analysis for sleep and executes a two-stage ML pipeline (Binary Cry Detection + CNN-LSTM 4-Class Classification) for audio.
+6. **Mobile application** streams insights via Firestore/RTDB and receives real-time FCM Push Notifications for alerts.
 
-This architecture ensures low latency, secure communication, and scalability.
+This architecture ensures low latency, secure communication, and scalability, utilizing a split edge-cloud compute model.
 
 ---
 
@@ -41,30 +57,32 @@ This architecture ensures low latency, secure communication, and scalability.
 
 | Component      | Purpose                                  |
 | -------------- | ---------------------------------------- |
-| ESP32          | Main microcontroller with WiFi & BLE     |
+| ESP32-S3       | Main microcontroller with WiFi           |
 | INMP441        | Digital microphone (I2S) for cry capture |
 | MPU6050        | Motion tracking for sleep detection      |
 | MAX30102       | Heart rate & pulse monitoring            |
-| BME280 / DHT11 | Temperature & humidity monitoring        |
+| BME280         | Temperature & humidity monitoring        |
 | Battery Module | Portable wearable power system           |
 
 ### Embedded System Responsibilities
 
 * Sensor data acquisition
-* Signal preprocessing
-* Secure MQTT publishing
-* Local buffering & fault handling
-* Power optimization for wearable usage
+* Signal preprocessing and local VAD (Energy + ZCR + Peak)
+* MQTT publishing
+* HTTP Raw PCM Upload
+* Local ring-buffering & fault handling
 
 ---
 
 ## 🧠 Artificial Intelligence & Machine Learning
 
-### 🎤 Cry Classification
+### 🎤 Cry Classification (Two-Stage Pipeline)
 
-* Audio preprocessing using MFCC (Mel-Frequency Cepstral Coefficients)
-* Neural network model trained on labeled cry dataset
-* Classification categories: Hunger, Pain, Discomfort, Normal
+1. **Stage 1 (Binary Detection):** A lightweight cloud model filters out non-cry audio triggers from the hardware.
+2. **Stage 2 (Classification):** A CNN-LSTM deep learning model categorizes the cry.
+   - Audio is converted into a 128x128x1 Mel Spectrogram.
+   - Classification categories: **Hungry, Tired, Discomfort, Diaper**.
+   - Model optimized with Categorical Focal Loss to handle dataset imbalance.
 
 ### 💤 Sleep Stage Detection
 
@@ -74,8 +92,8 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ### ML Technology Stack
 
-* **Python** (TensorFlow / PyTorch / Librosa / Scikit-learn)
-* **TensorFlow Lite / ONNX** (Model deployment)
+* **Python** (TensorFlow / Keras / Librosa)
+* **TensorFlow** (Model deployment in FastAPI)
 
 ---
 
@@ -83,24 +101,15 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ### Communication Protocol
 
-* MQTT over WiFi (ESP32 to AWS IoT Core)
-* Secure TLS-based communication
+* MQTT over WiFi (ESP32 to Azure Mosquitto Broker)
+* HTTP POST for audio uploads
 * REST APIs & Real-time Listeners (FastAPI & Flutter to Firebase)
 
 ### Cloud Platforms & Backend Setup
 
-* **AWS IoT Core**: Cloud MQTT broker for IoT devices
-* **AWS Lambda**: Serverless bridge between AWS IoT and Firebase
-* **Firebase (Firestore + RTDB + FCM)**: Real-time database for streams, and Cloud Messaging for emergency push notifications
-* **FastAPI (Python)**: Core backend server handling sliding-window telemetry buffers, ML inference (Keras/TFLite), safety classification, and alerting
-
-### Cloud Capabilities
-
-* Real-time device data ingestion
-* Secure device authentication (certificates)
-* Data storage & analytics
-* Alert triggering system
-* Weekly health reports generation
+* **Azure VM (Ubuntu)**: Hosts the Mosquitto MQTT broker and FastAPI backend.
+* **Firebase (Firestore + RTDB + FCM)**: Real-time database for streams, and Cloud Messaging for emergency push notifications.
+* **FastAPI (Python)**: Core backend server handling MQTT ingestion, sliding-window telemetry buffers, ML inference, safety classification, and alerting.
 
 ---
 
@@ -108,10 +117,10 @@ This architecture ensures low latency, secure communication, and scalability.
 
 ### Key Features
 
-* Live sensor readings via Firebase Real-Time Database (RTDB) and Firestore streams
-* Real-time FCM Push Notifications for cry detection and environment danger
-* Dynamic Sleep tracking and Environment dashboards using `StreamBuilder`
-* Secure authentication system with dynamic `device_id` resolution for multi-user mapping
+* Live sensor readings via Firebase Real-Time Database (RTDB) and Firestore streams.
+* Real-time FCM Push Notifications for cry detection and environment danger.
+* Dynamic Sleep tracking and Environment dashboards using `StreamBuilder`.
+* Secure authentication system with dynamic `device_id` resolution for multi-user mapping.
 
 The mobile application acts as the primary user interface for parents.
 
@@ -130,55 +139,13 @@ The mobile application acts as the primary user interface for parents.
 ```text
 Smart-Baby-Band-FYP/
 ├── app/               # Flutter mobile app
-├── backend/           # FastAPI backend (Python + Firebase + AWS Lambda)
+├── backend/           # FastAPI backend (Python + Firebase + Azure VM)
 ├── docs/              # Reports, diagrams, presentations
-├── hardware/          # Hardware code (ESP32 + sensors)
-├── ml_model/          # Cry detection model (datasets, training, inference)
+├── hardware/          # Hardware code (ESP32-S3 + sensors)
+├── ml_model/          # Cry detection & classification models (datasets, training)
 ├── .gitignore         # Root git ignore patterns
 └── requirements.txt   # Python dependencies
 ```
-
----
-
-## 🚀 Technical Skills Demonstrated
-
-* Embedded Systems Engineering (ESP32)
-* IoT Architecture Design
-* MQTT Protocol Implementation
-* Cloud Computing (AWS IoT Core / AWS Lambda / Firebase)
-* AI Model Development & Deployment
-* Edge Processing
-* Real-Time Data Streaming
-* Sensor Fusion Techniques
-* Secure Communication Architecture
-* Cross-Platform Mobile Development (Flutter)
-
----
-
-## 🎯 Project Impact
-
-The Smart Baby Band improves upon existing baby monitoring solutions by combining:
-
-* Real-time AI classification
-* Multi-sensor health monitoring
-* Integrated cloud analytics
-* Affordable and scalable hardware design
-
-It demonstrates the ability to design and deploy a full-stack IoT + AI system from hardware to cloud to user interface.
-
----
-
-## 🏆 Recruiter Summary
-
-This project showcases:
-
-* Complete IoT product development lifecycle
-* Hardware + AI + Cloud integration
-* Production-level architecture thinking
-* Secure real-time data engineering
-* Strong cross-team collaboration
-
-It reflects practical industry-ready skills in IoT, AI systems, and cloud integration.
 
 ---
 
@@ -187,7 +154,3 @@ It reflects practical industry-ready skills in IoT, AI systems, and cloud integr
 Academic Research Project – University of Central Punjab (2025)
 
 For demonstration and educational purposes.
-
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
-
-ssh -i baby-band_key.pem azureuser@20.195.40.177

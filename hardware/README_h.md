@@ -20,7 +20,7 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 - Run a lightweight VAD gate on the ESP32-S3 (cry vs. no-cry)
 - Maintain a 3-second circular PCM buffer in PSRAM (2 s pre + 1 s post)
 - Upload raw int16 PCM clips to the cloud over HTTP
-- Publish 10-second windowed aggregates (mean, variance, spikes) for vitals via MQTT over TLS
+- Publish 10-second windowed aggregates (mean, variance, spikes) for vitals via MQTT
 - Keep sensor and MQTT loops responsive using FreeRTOS tasks
 
 ---
@@ -39,7 +39,7 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 | Wi-Fi | 802.11 b/g/n 2.4GHz |
 | Audio interface | I2S (INMP441 microphone) |
 | Sensor interface | I2C (MAX30102, MPU6050, BME280) |
-| Framework | ESP-IDF 5.x with FreeRTOS |
+| Framework | ESP-IDF / Arduino with FreeRTOS |
 | Language | C++ |
 
 **Firmware responsibilities:**
@@ -48,9 +48,8 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 - 20 ms VAD frames with energy, ZCR, and peak checks
 - Continuous 3-second circular buffer in PSRAM
 - Trigger capture: 2 s pre-trigger + 1 s post-trigger
-- HTTP POST of raw PCM to the FastAPI /predict endpoint
-- MQTT vitals publishing to AWS IoT Core over TLS
-- NTP time sync for TLS certificate validation
+- HTTP POST of raw PCM to the FastAPI `/predict` endpoint on Azure VM
+- MQTT vitals publishing to a Mosquitto broker on the Azure VM
 
 ---
 
@@ -106,7 +105,7 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 |---|---|
 | I2S | INMP441 microphone - digital audio |
 | I2C | MAX30102, MPU6050, BME280 - shared bus |
-| Wi-Fi (MQTT TLS) | Vitals to AWS IoT Core |
+| Wi-Fi (MQTT) | Vitals to Azure Mosquitto Broker |
 | Wi-Fi (HTTP) | Raw PCM upload to FastAPI |
 
 **I2C bus management:** Sensors are polled in the main loop at fixed intervals:
@@ -122,7 +121,7 @@ The device uses a split-compute architecture: the edge runs a lightweight VAD (e
 
 ## MQTT Payload Schema (Vitals Only)
 
-Vitals are published periodically to AWS IoT Core on topic `babyband/01/data`:
+Vitals are published periodically to Mosquitto Broker on topic `babyband/01/data`:
 
 ```json
 {
@@ -158,24 +157,9 @@ When VAD triggers, the ESP32 sends a 3-second raw PCM clip:
 
 - Content-Type: application/octet-stream
 - Body: raw int16 little-endian PCM (48000 samples / 96 KB)
-- Endpoint: `http://10.9.202.162:8000/predict`
+- Endpoint: `http://20.195.40.177:8000/predict`
 
 The 3-second clip is composed of the **last 2 seconds in the ring buffer** plus **1 second of newly captured audio**.
-
----
-
-## Security Implementation
-
-- MQTT uses mutual TLS on port 8883
-- NTP time sync is required before TLS handshake
-- Device uses X.509 certs + AWS root CA
-- HTTP audio upload is plain HTTP on the local network (can be upgraded to HTTPS)
-
-**Files required in firmware:**
-
-- `device_cert.pem` - device certificate
-- `private_key.pem` - device private key
-- `aws_root_ca.pem` - AWS root CA
 
 ---
 
@@ -199,12 +183,9 @@ The 3-second clip is composed of the **last 2 seconds in the ring buffer** plus 
 
 | Challenge | Solution |
 |---|---|
-| MQTT TLS failed on boot | Forced strict NTP sync (UTC+5) with 20s timeout before TLS connect |
 | Audio capture blocked MQTT | Ring buffer + async capture/upload tasks |
-| MQTT reconnect froze main loop | Implemented non-blocking single-attempt connect with 15s backoff |
 | False positives in VAD | Energy + ZCR + peak + cooldown |
 | Limited RAM | 3-second PCM buffers in PSRAM |
-| DNS resolution failures | Bypass restrictive networks using Google Public DNS (8.8.8.8) |
 
 ---
 
@@ -214,14 +195,12 @@ The 3-second clip is composed of the **last 2 seconds in the ring buffer** plus 
 
 - ESP32-S3 firmware with VAD gate and ring buffer
 - Vitals sensing (MAX30102, MPU6050, BME280)
-- MQTT vitals publishing over TLS
-- HTTP PCM upload to cloud
-- NTP time sync for TLS validation
+- MQTT vitals publishing to Azure VM
+- HTTP PCM upload to Azure FastAPI
+- End-to-end telemetry and alert testing
 
 **In Progress:**
 
-- Cloud cry classification pipeline integration
-- End-to-end telemetry and alert testing
 - Wearable enclosure integration
 
 ---
